@@ -14,8 +14,8 @@ class RobotCanvas(QtWidgets.QWidget):
         self.plotter = QtInteractor(self)
         self.layout.addWidget(self.plotter.interactor)
         
-        # Premium White Environment
-        self.plotter.set_background("white")
+        # Restore the Premium Dark environment
+        self.plotter.set_background("dimgray")
         self.plotter.add_axes()
         
         # Bounded grid with simplified labels
@@ -54,91 +54,17 @@ class RobotCanvas(QtWidgets.QWidget):
         self.plotter.interactor.AddObserver("LeftButtonPressEvent", self._on_left_down)
         self.plotter.interactor.AddObserver("LeftButtonReleaseEvent", self._on_left_up)
 
-        # Overlay Buttons - Control Group
-        self.btn_group = QtWidgets.QWidget(self)
-        self.group_layout = QtWidgets.QVBoxLayout(self.btn_group)
-        self.group_layout.setContentsMargins(0, 0, 0, 0)
-        self.group_layout.setSpacing(5)
-
-        self.btn_style = """
-            QPushButton {
-                background-color: #f0f0f0;
-                color: #333;
-                border: 1px solid #ccc;
-                border-radius: 4px;
-                padding: 6px;
-                font-size: 11px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #e0e0e0;
-                border: 1px solid #999;
-            }
-            QPushButton:pressed {
-                background-color: #d0d0d0;
-            }
-        """
-
+        # Overlay Buttons
         self.focus_btn = QtWidgets.QPushButton("Focus Base", self)
-        self.focus_btn.setStyleSheet(self.btn_style)
+        self.focus_btn.setStyleSheet("background-color: #3d3d3d; color: white; border: 1px solid #555; padding: 5px;")
         self.focus_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        self.focus_btn.setFixedWidth(100)
+        self.focus_btn.resize(100, 30)
 
         self.pivot_btn = QtWidgets.QPushButton("🎯 Point", self)
-        self.pivot_btn.setStyleSheet(self.btn_style)
+        self.pivot_btn.setStyleSheet("background-color: #3d3d3d; color: white; border: 1px solid #555; padding: 5px;")
         self.pivot_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        self.pivot_btn.setFixedWidth(100)
+        self.pivot_btn.resize(80, 30)
         self.pivot_btn.clicked.connect(self.set_pivot_mode)
-
-        # Camera Group
-        self.cam_group = QtWidgets.QWidget(self)
-        self.cam_layout = QtWidgets.QVBoxLayout(self.cam_group)
-        self.cam_layout.setContentsMargins(0, 0, 0, 0)
-        self.cam_layout.setSpacing(5)
-
-        self.top_view_btn = QtWidgets.QPushButton("Top", self)
-        self.top_view_btn.setStyleSheet(self.btn_style)
-        self.top_view_btn.clicked.connect(lambda: self.set_view("top"))
-        
-        self.front_view_btn = QtWidgets.QPushButton("Front", self)
-        self.front_view_btn.setStyleSheet(self.btn_style)
-        self.front_view_btn.clicked.connect(lambda: self.set_view("front"))
-
-        self.side_view_btn = QtWidgets.QPushButton("Side", self)
-        self.side_view_btn.setStyleSheet(self.btn_style)
-        self.side_view_btn.clicked.connect(lambda: self.set_view("side"))
-
-        self.iso_view_btn = QtWidgets.QPushButton("Iso", self)
-        self.iso_view_btn.setStyleSheet(self.btn_style)
-        self.iso_view_btn.clicked.connect(lambda: self.set_view("iso"))
-
-        self.cam_layout.addWidget(self.top_view_btn)
-        self.cam_layout.addWidget(self.front_view_btn)
-        self.cam_layout.addWidget(self.side_view_btn)
-        self.cam_layout.addWidget(self.iso_view_btn)
-
-        # Toggle Group
-        self.toggle_group = QtWidgets.QWidget(self)
-        self.toggle_layout = QtWidgets.QHBoxLayout(self.toggle_group)
-        self.toggle_layout.setContentsMargins(0, 0, 0, 0)
-        self.toggle_layout.setSpacing(5)
-
-        self.grid_toggle_btn = QtWidgets.QPushButton("Grid", self)
-        self.grid_toggle_btn.setStyleSheet(self.btn_style)
-        self.grid_toggle_btn.setCheckable(True)
-        self.grid_toggle_btn.setChecked(True)
-        self.grid_toggle_btn.clicked.connect(self.toggle_grid)
-
-        self.axes_toggle_btn = QtWidgets.QPushButton("Axes", self)
-        self.axes_toggle_btn.setStyleSheet(self.btn_style)
-        self.axes_toggle_btn.setCheckable(True)
-        self.axes_toggle_btn.setChecked(True)
-        self.axes_toggle_btn.clicked.connect(self.toggle_axes)
-
-        self.toggle_layout.addWidget(self.grid_toggle_btn)
-        self.toggle_layout.addWidget(self.axes_toggle_btn)
-
-        self.grid_actor = None # To track the bounds actor
 
         self.on_face_picked_callback = None
         self.on_drop_callback = None
@@ -386,53 +312,9 @@ class RobotCanvas(QtWidgets.QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Position buttons with margin
-        margin = 10
-        
-        # Right aligned top group
-        self.focus_btn.move(self.width() - 110, margin)
-        self.pivot_btn.move(self.width() - 110, margin + 40)
-        
-        # Right aligned view group
-        self.cam_group.move(self.width() - 80, margin + 100)
-        self.cam_group.resize(70, 160)
-
-        # Bottom left toggle group
-        self.toggle_group.move(margin, self.height() - 40)
-        self.toggle_group.resize(150, 30)
-
-    def set_view(self, view_name):
-        """Sets the camera to standard views."""
-        if view_name == "top":
-            self.plotter.view_xy()
-        elif view_name == "front":
-            self.plotter.view_zx()
-        elif view_name == "side":
-            self.plotter.view_zy()
-        elif view_name == "iso":
-            self.plotter.view_isometric()
-        self.plotter.render()
-
-    def toggle_grid(self, checked):
-        """Toggles the bounded grid orientation."""
-        if checked:
-            self.plotter.show_bounds(
-                xtitle="X", ytitle="Y", ztitle="Z",
-                n_xlabels=2, n_ylabels=2, n_zlabels=2,
-                fmt="",
-                all_edges=True
-            )
-        else:
-            self.plotter.remove_bounds_axes()
-        self.plotter.render()
-
-    def toggle_axes(self, checked):
-        """Toggles the orientation axes."""
-        if checked:
-            self.plotter.add_axes()
-        else:
-            self.plotter.hide_axes()
-        self.plotter.render()
+        # Top right corner, with some margin
+        self.focus_btn.move(self.width() - 110, 10)
+        self.pivot_btn.move(self.width() - 200, 10) # Position to left of Focus btn
 
     def set_pivot_mode(self):
         self.interaction_mode = "pivot"
@@ -714,7 +596,7 @@ class RobotCanvas(QtWidgets.QWidget):
                 if clicked_name in robot.links:
                     link = robot.links[clicked_name]
                     if link.parent_joint:
-                        self.mw_log(f"⚠ Locked: '{clicked_name}' is aligned/jointed. Unjoint reset transform to move freely.")
+                        self.mw_log(f"\u26a0 Locked: '{clicked_name}' is aligned/jointed. Unjoint reset transform to move freely.")
                         self.select_actor(clicked_name) # Select it visually
                         self.plotter.interactor.GetInteractorStyle().OnLeftButtonDown() # Allow camera rotate
                         return
@@ -830,8 +712,8 @@ class RobotCanvas(QtWidgets.QWidget):
         else:
             poly = mesh # assume it's already pyvista compatible
             
-        # Revert to standard color for light background
-        actor = self.plotter.add_mesh(poly, color="gray", show_edges=True, edge_color="black", line_width=1, name=link_name)
+        # Revert to standard color for dark background
+        actor = self.plotter.add_mesh(poly, color="silver", show_edges=True, name=link_name)
         # Apply transform
         actor.user_matrix = transform
         self.actors[link_name] = actor
