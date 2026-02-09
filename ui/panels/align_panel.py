@@ -459,36 +459,25 @@ class AlignPanel(QtWidgets.QWidget):
         self.child_label.setText("Child: None selected")
         
         # 3. Finalize the Robot Model
-        if child_link.parent_joint:
-            # Already has a parent? Update the offset relative to it.
-            parent_world = child_link.parent_joint.parent_link.t_world
-            inv_p = np.linalg.inv(parent_world)
-            inv_j = np.linalg.inv(child_link.parent_joint.get_matrix())
-            child_link.t_offset = inv_p @ final_world @ inv_j
-        else:
-            # No current parent.
-            # CRITICAL UPDATE: We must create a formal JOINT to 'Lock' it to the picked parent.
-            # This ensures they move together and the child is marked as 'aligned/locked' for the canvas.
-            p_name = parent_cache['name'] # Use CACHED data
-            
-            # Create a fixed/rigid joint connection
-            # Name convention: "Fixed_Parent_Child"
-            joint_name = f"Fixed_{p_name}_{child_name}"
-            
-            # Add joint to Robot Model
-            # This automatically sets child_link.parent_joint = new_joint
-            new_joint = self.mw.robot.add_joint(joint_name, p_name, child_name)
-            
-            # Now calculate the offset relative to this new parent
-            parent_link = self.mw.robot.links[p_name]
-            inv_p_new = np.linalg.inv(parent_link.t_world)
-            # Joint matrix is Identity for 'fixed' or 0-angle initially
-            child_link.t_offset = inv_p_new @ final_world
+        # No formal joint here anymore, we move to Joint Panel for that!
+        child_link.t_offset = final_world
 
         # 4. Lock and Log
-        self.mw.log(f"ALIGNMENT LOCKED: {child_name} is now jointed to {parent_cache.get('name', 'Parent')}.")
+        self.mw.log(f"ALIGNMENT LOCKED: {child_name} position updated.")
         self.mw.canvas.clear_highlights()
         
+        # Proactively start Joint creation in Joint Tab
+        if hasattr(self.mw, 'joint_tab'):
+            self.mw.joint_tab.parent_object = parent_cache['name']
+            self.mw.joint_tab.child_object = child_name
+            self.mw.joint_tab.alignment_point = self.alignment_point.copy()
+            
+            # Switch to Joint Tab (Index 2)
+            self.mw.tabs.setCurrentIndex(2)
+            
+            # Trigger 'create_joint' logic which shows Section 3
+            self.mw.joint_tab.create_joint()
+            
         # Now safe to reset UI
         for s in self.sliders.values(): s.setValue(0)
         self.mw.robot.update_kinematics()

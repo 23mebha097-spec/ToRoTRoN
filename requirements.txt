@@ -1,0 +1,6 @@
+PyQt5
+pyvista
+pyvistaqt
+trimesh
+numpy
+pyserial

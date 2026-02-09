@@ -1,6 +1,6 @@
 import pyvista as pv
 from pyvistaqt import QtInteractor
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore, QtGui
 import numpy as np
 import vtk
 
@@ -700,7 +700,7 @@ class RobotCanvas(QtWidgets.QWidget):
             return 
             
         self.plotter.interactor.GetInteractorStyle().OnMouseMove()
-    def update_link_mesh(self, link_name, mesh, transform):
+    def update_link_mesh(self, link_name, mesh, transform, color="silver"):
         """Adds or updates a link mesh in the scene."""
         if link_name in self.actors:
             self.plotter.remove_actor(self.actors[link_name])
@@ -712,12 +712,18 @@ class RobotCanvas(QtWidgets.QWidget):
         else:
             poly = mesh # assume it's already pyvista compatible
             
-        # Revert to standard color for dark background
-        actor = self.plotter.add_mesh(poly, color="silver", show_edges=True, name=link_name)
+        # Use provided color instead of hardcoded silver
+        actor = self.plotter.add_mesh(poly, color=color, show_edges=True, name=link_name)
         # Apply transform
         actor.user_matrix = transform
         self.actors[link_name] = actor
         self.plotter.render()
+
+    def set_actor_color(self, name, hex_color):
+        """Changes the color of an existing actor."""
+        if name in self.actors:
+            self.actors[name].GetProperty().SetColor(QtGui.QColor(hex_color).getRgbF()[:3])
+            self.plotter.render()
 
     def select_actor(self, name):
         """Programmatically select and highlight an actor by name."""

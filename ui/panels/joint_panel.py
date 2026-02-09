@@ -49,103 +49,9 @@ class JointPanel(QtWidgets.QWidget):
         """)
         self.objects_list.itemClicked.connect(self.on_object_clicked)
         layout.addWidget(self.objects_list)
-        # --- ROTATION AXIS SECTION (appears after parent/child selected) ---
+        # Section 2 is being removed as requested
         self.axis_section = QtWidgets.QWidget()
-        self.axis_section.setStyleSheet("background-color: #1e1e1e; padding: 10px;")
-        self.axis_section.setVisible(False)  # Hidden by default
-        
-        axis_layout = QtWidgets.QVBoxLayout(self.axis_section)
-        axis_layout.setSpacing(10)
-        
-        # Section header
-        header_label = QtWidgets.QLabel("2. JOINT ALIGNMENT")
-        header_label.setStyleSheet("color: #4ecdc4; font-size: 14px; font-weight: bold; padding: 5px;")
-        axis_layout.addWidget(header_label)
-        
-        # Instruction text
-        instruction = QtWidgets.QLabel("Contact points from Align panel (or pick manually):")
-        instruction.setStyleSheet("color: #aaa; font-size: 12px; padding: 5px;")
-        instruction.setWordWrap(True)
-        axis_layout.addWidget(instruction)
-        
-        # Point picking buttons
-        pick_row = QtWidgets.QHBoxLayout()
-        
-        self.pick_parent_point_btn = QtWidgets.QPushButton("Pick Parent Contact")
-        self.pick_parent_point_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d32f2f;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 8px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #f44336;
-            }
-        """)
-        self.pick_parent_point_btn.clicked.connect(self.pick_parent_contact)
-        pick_row.addWidget(self.pick_parent_point_btn)
-        
-        self.pick_child_point_btn = QtWidgets.QPushButton("Pick Child Contact")
-        self.pick_child_point_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1976d2;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 8px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #2196f3;
-            }
-        """)
-        self.pick_child_point_btn.clicked.connect(self.pick_child_contact)
-        pick_row.addWidget(self.pick_child_point_btn)
-        
-        axis_layout.addLayout(pick_row)
-        
-        # Display picked points
-        self.parent_contact_label = QtWidgets.QLabel("Parent contact: Not picked")
-        self.parent_contact_label.setStyleSheet("color: #888; font-size: 11px; padding: 3px;")
-        axis_layout.addWidget(self.parent_contact_label)
-        
-        self.child_contact_label = QtWidgets.QLabel("Child contact: Not picked")
-        self.child_contact_label.setStyleSheet("color: #888; font-size: 11px; padding: 3px;")
-        axis_layout.addWidget(self.child_contact_label)
-        
-        # Display alignment point
-        self.alignment_point_label = QtWidgets.QLabel("Alignment Point: Pick both contacts first")
-        self.alignment_point_label.setStyleSheet("color: #888; font-size: 12px; padding: 5px;")
-        axis_layout.addWidget(self.alignment_point_label)
-        
-        # Create Joint Button
-        self.create_joint_btn = QtWidgets.QPushButton("CREATE JOINT")
-        self.create_joint_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f57c00;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 15px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #ff8c00;
-            }
-            QPushButton:disabled {
-                background-color: #4d4d4d;
-                color: #888;
-            }
-        """)
-        self.create_joint_btn.clicked.connect(self.create_joint)
-        self.create_joint_btn.setEnabled(False)
-        axis_layout.addWidget(self.create_joint_btn)
-        
-        layout.addWidget(self.axis_section)
+        self.axis_section.setVisible(False)
         
         # --- ROTATION AXIS & LIMITS SECTION (appears after CREATE JOINT) ---
         self.rotation_section = QtWidgets.QWidget()
@@ -589,6 +495,48 @@ class JointPanel(QtWidgets.QWidget):
         self.mw.canvas.update_transforms(self.mw.robot)
         self.mw.log(f"Joint deleted successfully.")
 
+    def select_object(self, name):
+        """Selection logic for external calls"""
+        self.selected_object = name
+        self.parent_btn.setEnabled(True)
+        self.child_btn.setEnabled(True)
+        self.mw.canvas.select_actor(name)
+
+    def set_as_parent(self):
+        """Set selected object as parent"""
+        if not self.selected_object:
+            return
+            
+        self.parent_object = self.selected_object
+        self.mw.log(f"Parent set to: {self.parent_object}")
+        self.save_to_history()
+        self.mw.canvas.deselect_all()
+        self.refresh_links()
+        
+        # Section 2 is gone, so we don't call check_show_axis_section
+        self.parent_btn.setEnabled(False)
+        self.child_btn.setEnabled(False)
+        self.selected_object = None
+
+    def set_as_child(self):
+        """Set selected object as child"""
+        if not self.selected_object:
+            return
+        
+        if self.selected_object in self.joints:
+            self.mw.log(f"Error: {self.selected_object} is already a jointed child.")
+            return
+            
+        self.child_object = self.selected_object
+        self.mw.log(f"Child set to: {self.child_object}")
+        self.save_to_history()
+        self.mw.canvas.deselect_all()
+        self.refresh_links()
+        
+        # Section 2 is gone, so we don't call check_show_axis_section
+        self.parent_btn.setEnabled(False)
+        self.child_btn.setEnabled(False)
+        self.selected_object = None
     def undo_selection(self):
         """Undo the last parent/child selection"""
         if self.history_index > 0:
@@ -597,7 +545,6 @@ class JointPanel(QtWidgets.QWidget):
             self.parent_object = parent
             self.child_object = child
             self.refresh_links()
-            self.check_show_axis_section()
             self.mw.log(f"Undo: Parent={parent}, Child={child}")
         else:
             self.mw.log("Nothing to undo.")
@@ -610,7 +557,6 @@ class JointPanel(QtWidgets.QWidget):
             self.parent_object = parent
             self.child_object = child
             self.refresh_links()
-            self.check_show_axis_section()
             self.mw.log(f"Redo: Parent={parent}, Child={child}")
         else:
             self.mw.log("Nothing to redo.")
@@ -686,192 +632,6 @@ class JointPanel(QtWidgets.QWidget):
         self.joint_control_section.setVisible(True)
         self.mw.log(f"Joint control active for: {object_name}")
 
-    def set_as_parent(self):
-        """Set selected object as parent"""
-        if not self.selected_object:
-            return
-        
-        # Jointed objects CAN be parents (allows building chains A→B→C)
-        # No restriction here
-            
-        self.parent_object = self.selected_object
-        self.mw.log(f"Parent set to: {self.parent_object}")
-        
-        # Save to history
-        self.save_to_history()
-        
-        # Remove yellow highlight (return to normal)
-        self.mw.canvas.deselect_all()
-        
-        # Refresh list to show colored indicator
-        self.refresh_links()
-        
-        # Check if both parent and child are selected
-        self.check_show_axis_section()
-        
-        # Disable buttons until next selection
-        self.parent_btn.setEnabled(False)
-        self.child_btn.setEnabled(False)
-        self.selected_object = None
-
-    def set_as_child(self):
-        """Set selected object as child"""
-        if not self.selected_object:
-            return
-        
-        # Check if this object already has a joint (already a child somewhere)
-        # A child can only have ONE parent, so prevent reassignment
-        if self.selected_object in self.joints:
-            self.mw.log(f"Error: {self.selected_object} is already a jointed child and cannot have multiple parents.")
-            return
-            
-        self.child_object = self.selected_object
-        self.mw.log(f"Child set to: {self.child_object}")
-        
-        # Save to history
-        self.save_to_history()
-        
-        # Remove yellow highlight (return to normal)
-        self.mw.canvas.deselect_all()
-        
-        # Refresh list to show colored indicator
-        self.refresh_links()
-        
-        # Check if both parent and child are selected
-        self.check_show_axis_section()
-        
-        # Disable buttons until next selection
-        self.parent_btn.setEnabled(False)
-        self.child_btn.setEnabled(False)
-        self.selected_object = None
-
-    def check_show_axis_section(self):
-        """Show axis section and calculate alignment point if both objects selected"""
-        if self.parent_object and self.child_object:
-            self.axis_section.setVisible(True)
-            
-            # Try to get alignment data from Align panel
-            align_panel = self.mw.align_tab
-            auto_calculated = False
-            
-            # Check if alignment point was stored when "Lock Assembly" was pressed
-            if hasattr(align_panel, 'alignment_point') and align_panel.alignment_point is not None:
-                # Use the pre-calculated alignment point directly!
-                self.alignment_point = align_panel.alignment_point.copy()
-                
-                # Update labels to show it's from alignment
-                self.parent_contact_label.setText(f"From alignment (parent face)")
-                self.parent_contact_label.setStyleSheet("color: #4CAF50; font-size: 11px; padding: 3px; font-weight: bold;")
-                self.child_contact_label.setText(f"From alignment (child face)")
-                self.child_contact_label.setStyleSheet("color: #2196F3; font-size: 11px; padding: 3px; font-weight: bold;")
-                
-                # Display alignment point
-                self.alignment_point_label.setText(
-                    f"Alignment Point: ({self.alignment_point[0]:.2f}, {self.alignment_point[1]:.2f}, {self.alignment_point[2]:.2f})"
-                )
-                self.alignment_point_label.setStyleSheet("color: #4ecdc4; font-size: 12px; padding: 5px; font-weight: bold;")
-                
-                # Enable create button
-                self.create_joint_btn.setEnabled(True)
-                
-                # AUTO-SELECT ROTATION AXIS FROM FACE NORMAL
-                if hasattr(align_panel, 'alignment_normal') and align_panel.alignment_normal is not None:
-                    axis_vector = align_panel.alignment_normal
-                    
-                    # Find which axis (X/Y/Z) the normal is closest to
-                    abs_x = abs(axis_vector[0])
-                    abs_y = abs(axis_vector[1])
-                    abs_z = abs(axis_vector[2])
-                    
-                    if abs_x > abs_y and abs_x > abs_z:
-                        self.axis_x_radio.setChecked(True)
-                        axis_name = "X"
-                    elif abs_y > abs_x and abs_y > abs_z:
-                        self.axis_y_radio.setChecked(True)
-                        axis_name = "Y"
-                    else:
-                        self.axis_z_radio.setChecked(True)
-                        axis_name = "Z"
-                    
-                    self.mw.log(f"Auto-detected rotation axis: {axis_name} (from face normal)")
-                
-                # Hide picking buttons section completely
-                self.pick_parent_point_btn.setVisible(False)
-                self.pick_child_point_btn.setVisible(False)
-                
-                # Show yellow arrow immediately
-                self.show_joint_arrow()
-                
-                auto_calculated = True
-                self.mw.log("Using stored alignment point from Lock Assembly.")
-            
-            if not auto_calculated:
-                # Reset for manual picking
-                self.parent_contact_point = None
-                self.child_contact_point = None
-                self.parent_contact_label.setText("Parent contact: Not picked")
-                self.parent_contact_label.setStyleSheet("color: #888; font-size: 11px; padding: 3px;")
-                self.child_contact_label.setText("Child contact: Not picked")
-                self.child_contact_label.setStyleSheet("color: #888; font-size: 11px; padding: 3px;")
-                self.alignment_point_label.setText("Alignment Point: Pick both contacts first")
-                self.alignment_point_label.setStyleSheet("color: #888; font-size: 12px; padding: 5px;")
-                
-                # Show picking buttons
-                self.pick_parent_point_btn.setVisible(True)
-                self.pick_child_point_btn.setVisible(True)
-                
-                # Disable create button until both points are picked
-                self.create_joint_btn.setEnabled(False)
-                
-                self.mw.log("No alignment data found. Please pick contact points manually.")
-        else:
-            self.axis_section.setVisible(False)
-            if hasattr(self, 'create_joint_btn'):
-                self.create_joint_btn.setEnabled(False)
-
-    def pick_parent_contact(self):
-        """Pick a contact point on the parent object surface"""
-        self.mw.canvas.start_point_picking(self.on_parent_contact_picked)
-        self.mw.log("Click on the parent object surface where it touches the child...")
-
-    def pick_child_contact(self):
-        """Pick a contact point on the child object surface"""
-        self.mw.canvas.start_point_picking(self.on_child_contact_picked)
-        self.mw.log("Click on the child object surface where it touches the parent...")
-
-    def on_parent_contact_picked(self, pos):
-        """Callback when parent contact point is picked"""
-        self.parent_contact_point = np.array(pos)
-        self.parent_contact_label.setText(f"Parent contact: ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})")
-        self.parent_contact_label.setStyleSheet("color: #f44336; font-size: 11px; padding: 3px; font-weight: bold;")
-        self.mw.log(f"Parent contact point set: {pos}")
-        self.calculate_alignment_point()
-
-    def on_child_contact_picked(self, pos):
-        """Callback when child contact point is picked"""
-        self.child_contact_point = np.array(pos)
-        self.child_contact_label.setText(f"Child contact: ({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f})")
-        self.child_contact_label.setStyleSheet("color: #2196f3; font-size: 11px; padding: 3px; font-weight: bold;")
-        self.mw.log(f"Child contact point set: {pos}")
-        self.calculate_alignment_point()
-
-    def calculate_alignment_point(self):
-        """Calculate alignment point from parent and child contact points"""
-        if self.parent_contact_point is not None and self.child_contact_point is not None:
-            # Midpoint between the two contact points
-            self.alignment_point = (self.parent_contact_point + self.child_contact_point) / 2.0
-            
-            # Display
-            self.alignment_point_label.setText(
-                f"Alignment Point: ({self.alignment_point[0]:.2f}, {self.alignment_point[1]:.2f}, {self.alignment_point[2]:.2f})"
-            )
-            self.alignment_point_label.setStyleSheet("color: #4ecdc4; font-size: 12px; padding: 5px; font-weight: bold;")
-            
-            # Enable create button
-            self.create_joint_btn.setEnabled(True)
-            
-            self.mw.log("Alignment point calculated from contact points.")
-
     def create_joint(self):
         """Create the joint between parent and child"""
         if not self.parent_object or not self.child_object or not hasattr(self, 'alignment_point'):
@@ -897,9 +657,6 @@ class JointPanel(QtWidgets.QWidget):
         # Pre-fill joint name
         default_name = f"joint_{self.parent_object}_{self.child_object}"
         self.joint_name_input.setText(default_name)
-        
-        # Disable CREATE JOINT button
-        self.create_joint_btn.setEnabled(False)
 
     def update_slider_range(self):
         """Update slider range when min/max limits change"""
@@ -939,7 +696,7 @@ class JointPanel(QtWidgets.QWidget):
 
     def test_rotation(self, value):
         """Test rotate the child object based on slider value"""
-        if not hasattr(self, 'original_child_transform') or not self.child_object:
+        if not hasattr(self, 'original_child_transform') or not self.child_object or self.child_object not in self.mw.robot.links:
             return
         
         # Convert slider value to degrees
@@ -1182,7 +939,6 @@ class JointPanel(QtWidgets.QWidget):
         
         self.axis_section.setVisible(False)
         self.rotation_section.setVisible(False)
-        self.create_joint_btn.setEnabled(False)
         
         self.refresh_links()
         self.mw.log("Joint creation complete. Ready for next joint.")
