@@ -443,23 +443,22 @@ class AlignPanel(QtWidgets.QWidget):
         child_cache = self.child_pick_data.copy()
         
         # STORE ALIGNMENT POINT FOR JOINT CREATION
-        # Use the parent face center - this is where the faces touch
         parent_center = np.array(parent_cache['center'])
         self.alignment_point = parent_center  # The actual contact point
         self.alignment_normal = np.array(parent_cache['normal'])
         
+        # Store in project-wide cache for Joint Panel retrieval
+        self.mw.alignment_cache[(parent_cache['name'], child_name)] = self.alignment_point.copy()
+        
         self.mw.log(f"Stored contact point: {self.alignment_point}")
         
         # 2. CLEAR PICK DATA FIRST
-        # This is critical: it prevents the slider reset from triggering a 'preview' update
-        # that would jump the object back to 0 degrees.
         self.parent_pick_data = None
         self.child_pick_data = None
         self.parent_label.setText("Parent: None selected")
         self.child_label.setText("Child: None selected")
         
         # 3. Finalize the Robot Model
-        # No formal joint here anymore, we move to Joint Panel for that!
         child_link.t_offset = final_world
 
         # 4. Lock and Log
@@ -473,9 +472,9 @@ class AlignPanel(QtWidgets.QWidget):
             self.mw.joint_tab.alignment_point = self.alignment_point.copy()
             
             # Switch to Joint Tab (Index 2)
-            self.mw.tabs.setCurrentIndex(2)
+            self.mw.left_panel.setCurrentIndex(2)
             
-            # Trigger 'create_joint' logic which shows Section 3
+            # Trigger 'create_joint' logic
             self.mw.joint_tab.create_joint()
             
         # Now safe to reset UI

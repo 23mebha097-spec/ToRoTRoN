@@ -20,6 +20,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.robot = Robot()
         self.serial_mgr = SerialManager(self)
+        self.alignment_cache = {} # Cache for storing alignment points: {(parent, child): point}
         self.init_ui()
         self.apply_styles()
         

@@ -517,6 +517,10 @@ class JointPanel(QtWidgets.QWidget):
         self.parent_btn.setEnabled(False)
         self.child_btn.setEnabled(False)
         self.selected_object = None
+        
+        # New: Check for cached alignment
+        if self.parent_object and self.child_object:
+            self.check_for_cached_alignment()
 
     def set_as_child(self):
         """Set selected object as child"""
@@ -537,6 +541,20 @@ class JointPanel(QtWidgets.QWidget):
         self.parent_btn.setEnabled(False)
         self.child_btn.setEnabled(False)
         self.selected_object = None
+        
+        # New: Check for cached alignment
+        if self.parent_object and self.child_object:
+            self.check_for_cached_alignment()
+
+    def check_for_cached_alignment(self):
+        """Check if an alignment exists for the current parent/child pair"""
+        pair = (self.parent_object, self.child_object)
+        if pair in self.mw.alignment_cache:
+            self.alignment_point = self.mw.alignment_cache[pair]
+            self.mw.log(f"Matched alignment point found for {pair}: {self.alignment_point}")
+            self.create_joint()
+        else:
+            self.mw.log(f"No cached alignment found for {pair}. Objects must be aligned in 'Align' tab first.")
     def undo_selection(self):
         """Undo the last parent/child selection"""
         if self.history_index > 0:
@@ -634,7 +652,7 @@ class JointPanel(QtWidgets.QWidget):
 
     def create_joint(self):
         """Create the joint between parent and child"""
-        if not self.parent_object or not self.child_object or not hasattr(self, 'alignment_point'):
+        if not self.parent_object or not self.child_object or self.alignment_point is None:
             self.mw.log("Error: Parent, child, or alignment point not set.")
             return
         
