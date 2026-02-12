@@ -126,35 +126,44 @@ WAIT 0.5
             hw_sync = self.mw.serial_mgr.is_connected if hasattr(self.mw, 'serial_mgr') else False
         
         try:
-            # Check for SPEED parameter
             parts = line.split()
-            speed = 0
+            if not parts: return
             original_line = line
             
+            # 1. Extract SPEED if present
+            speed = 0
             if "SPEED" in [p.upper() for p in parts]:
-                speed_idx = [p.upper() for p in parts].index("SPEED")
-                if speed_idx + 1 < len(parts):
-                    speed = float(parts[speed_idx + 1])
-                    line = " ".join(parts[:speed_idx])
+                s_idx = [p.upper() for p in parts].index("SPEED")
+                if s_idx + 1 < len(parts):
+                    speed = float(parts[s_idx + 1])
+                # Remove SPEED and its value from parts for command parsing
+                parts = parts[:s_idx]
             
-            # 1. Split numeric value from the right
-            line_parts = line.rsplit(None, 1)
-            if len(line_parts) < 2: return
-                
-            cmd_and_name = line_parts[0]
-            val_str = line_parts[1]
-            
-            # 2. Split command from the left
-            head_parts = cmd_and_name.split(None, 1)
-            cmd = head_parts[0].upper()
-            j_name = head_parts[1] if len(head_parts) > 1 else ""
-            
-            # --- SHORTHAND SUPPORT ---
-            if cmd not in ["JOINT", "WAIT", "MOVE"] and head_parts[0] in self.mw.robot.joints:
-                j_name = head_parts[0]
-                cmd = "JOINT"
-            
-            val = float(val_str)
+            # 2. Identify Command and Joint Name
+            cmd = parts[0].upper()
+            j_name = ""
+            val = 0.0
+
+            if cmd == "WAIT":
+                if len(parts) >= 2:
+                    val = float(parts[1])
+            elif cmd == "JOINT":
+                if len(parts) >= 3:
+                    j_name = parts[1]
+                    val = float(parts[2])
+            else:
+                # Potential Shorthand: Name Value (e.g. j1 90)
+                if len(parts) >= 2:
+                    potential_name = parts[0]
+                    if potential_name in self.mw.robot.joints:
+                        cmd = "JOINT"
+                        j_name = potential_name
+                        val = float(parts[1])
+                    else:
+                        self.mw.log(f"❓ Unknown joint or command: {potential_name}")
+                        return
+                else:
+                    return
             
             if cmd == "JOINT":
                 if j_name in self.mw.robot.joints:

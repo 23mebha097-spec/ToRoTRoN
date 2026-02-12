@@ -10,6 +10,8 @@ from core.serial_manager import SerialManager
 import os
 import numpy as np
 import random
+from ui.widgets.code_drawer import CodeDrawer
+from core.firmware_gen import generate_esp32_firmware
 
 class MainWindow(QtWidgets.QMainWindow):
     log_signal = QtCore.pyqtSignal(str)
@@ -221,11 +223,34 @@ class MainWindow(QtWidgets.QMainWindow):
         self.right_splitter.setSizes([600, 150])
         
         # Add components to main horizontal splitter
+        self.gen_code_btn = QtWidgets.QPushButton("⚡ GENERATE ESP32 CODE")
+        self.gen_code_btn.setToolTip("Auto-generate Arduino code for all joints")
+        self.gen_code_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f39c12; 
+                color: white; 
+                font-weight: bold; 
+                padding: 10px;
+                font-size: 11px;
+                border: none;
+                margin: 5px;
+            }
+            QPushButton:hover {
+                background-color: #e67e22;
+            }
+        """)
+        self.gen_code_btn.clicked.connect(self.on_generate_code)
+        left_layout.addWidget(self.gen_code_btn)
+
         self.main_splitter.addWidget(left_container)
         self.main_splitter.addWidget(self.right_splitter)
         
-        # Set initial side-to-side bias
-        self.main_splitter.setSizes([350, 850])
+        # --- CODE DRAWER (Right sidebar) ---
+        self.code_drawer = CodeDrawer(self)
+        self.main_splitter.addWidget(self.code_drawer)
+        
+        # Set initial side-to-side bias (Left=350, RightSplitter=850, Code=0)
+        self.main_splitter.setSizes([350, 850, 0])
         
         self.main_layout.addWidget(self.main_splitter)
         
@@ -601,6 +626,21 @@ class MainWindow(QtWidgets.QMainWindow):
             self.serial_mgr.disconnect()
             self.connect_btn.setText("CONNECT")
             self.connect_btn.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold;")
+
+    def on_generate_code(self):
+        """Generates ESP32 code and populates the sidebar panel."""
+        if not self.robot.joints:
+            self.log("⚠️ No joints defined! Add some joints first.")
+            return
+            
+        code = generate_esp32_firmware(self.robot)
+        self.code_drawer.set_code(code)
+        
+        # Expand the splitter to show the code panel (Width 400 suggested)
+        self.code_drawer.show()
+        self.main_splitter.setSizes([350, 450, 400])
+        
+        self.log("⚡ ESP32 Code Generated in Sidebar.")
 
     def import_mesh(self):
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(

@@ -472,7 +472,7 @@ class AlignPanel(QtWidgets.QWidget):
             self.mw.joint_tab.alignment_point = self.alignment_point.copy()
             
             # Switch to Joint Tab (Index 2)
-            self.mw.left_panel.setCurrentIndex(2)
+            self.mw.switch_panel(2)
             
             # Trigger 'create_joint' logic
             self.mw.joint_tab.create_joint()

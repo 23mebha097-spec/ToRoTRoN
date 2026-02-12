@@ -2,7 +2,8 @@ import pyvista as pv
 from pyvistaqt import QtInteractor
 from PyQt5 import QtWidgets, QtCore, QtGui
 import numpy as np
-import vtk
+import vtkmodules.vtkRenderingCore as vtkRenderingCore
+import vtkmodules.vtkCommonCore as vtkCommonCore
 
 class RobotCanvas(QtWidgets.QWidget):
     def __init__(self, parent=None):
@@ -46,7 +47,7 @@ class RobotCanvas(QtWidgets.QWidget):
        
         # WE DISABLE PyVista's built-in picking to avoid conflicts
         # Instead, we will use a dedicated vtkCellPicker for surgical precision
-        self.cell_picker = vtk.vtkCellPicker()
+        self.cell_picker = vtkRenderingCore.vtkCellPicker()
         self.cell_picker.SetTolerance(0.0005)
         
         # Override interactor events
@@ -172,7 +173,7 @@ class RobotCanvas(QtWidgets.QWidget):
                     p2 = edge.GetPointId(1)
                     
                     # Find cells that share this edge
-                    id_list = vtk.vtkIdList()
+                    id_list = vtkCommonCore.vtkIdList()
                     mesh.GetCellEdgeNeighbors(current, p1, p2, id_list)
                     
                     for j in range(id_list.GetNumberOfIds()):

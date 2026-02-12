@@ -76,6 +76,7 @@ class SerialManager:
             # Format: joint_id:angle:speed\n
             # e.g. shoulder:45.00:10.00\n
             command = f"{joint_id}:{angle:.2f}:{speed:.2f}\n"
+            self.mw.log(f"📡 Serial Tx: {command.strip()}")
             self.serial_port.write(command.encode('utf-8'))
         except Exception as e:
             self.mw.log(f"Serial Send Error: {e}")
