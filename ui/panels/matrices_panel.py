@@ -13,7 +13,7 @@ class MatricesPanel(QtWidgets.QWidget):
         
         # Top: Matrix Display
         header_matrices = QtWidgets.QLabel("TRANSFORM MATRICES")
-        header_matrices.setStyleSheet("color: #4ecdc4; font-size: 14px; font-weight: bold; padding: 5px;")
+        header_matrices.setStyleSheet("color: #1976d2; font-size: 14px; font-weight: bold; padding: 5px;")
         layout.addWidget(header_matrices)
 
         self.refresh_btn = QtWidgets.QPushButton("Update Matrices")
@@ -23,17 +23,17 @@ class MatricesPanel(QtWidgets.QWidget):
         self.text_area = QtWidgets.QTextEdit()
         self.text_area.setReadOnly(True)
         self.text_area.setFont(QtGui.QFont("Consolas", 10))
-        self.text_area.setStyleSheet("background-color: #1a1a1a; color: #4CAF50; border: 1px solid #333;")
+        self.text_area.setStyleSheet("background-color: white; color: #1565c0; border: 1px solid #e0e0e0;")
         layout.addWidget(self.text_area)
 
         # Bottom: Joint Control Sliders
         header_sliders = QtWidgets.QLabel("JOINT ROTATION CONTROLS")
-        header_sliders.setStyleSheet("color: #ffa500; font-size: 14px; font-weight: bold; margin-top: 15px; padding: 5px;")
+        header_sliders.setStyleSheet("color: #ff9800; font-size: 14px; font-weight: bold; margin-top: 15px; padding: 5px;")
         layout.addWidget(header_sliders)
 
         self.scroll_area = QtWidgets.QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setStyleSheet("background-color: #1a1a1a; border: none;")
+        self.scroll_area.setStyleSheet("background-color: white; border: none;")
         
         self.slider_container = QtWidgets.QWidget()
         self.slider_layout = QtWidgets.QVBoxLayout(self.slider_container)
@@ -55,21 +55,21 @@ class MatricesPanel(QtWidgets.QWidget):
         joint_data = self.mw.joint_tab.joints
         if not joint_data:
             empty_msg = QtWidgets.QLabel("No joints created yet.")
-            empty_msg.setStyleSheet("color: #666; font-style: italic; padding: 10px;")
+            empty_msg.setStyleSheet("color: #9e9e9e; font-style: italic; padding: 10px;")
             self.slider_layout.addWidget(empty_msg)
             return
 
         for child_name, data in joint_data.items():
             # Container for each joint's control
             group = QtWidgets.QFrame()
-            group.setStyleSheet("background-color: #222; border-radius: 5px; margin-bottom: 5px; border: 1px solid #333;")
+            group.setStyleSheet("background-color: #f5f5f5; border-radius: 5px; margin-bottom: 5px; border: 1px solid #e0e0e0;")
             glay = QtWidgets.QVBoxLayout(group)
             glay.setContentsMargins(10, 5, 10, 5)
             
             # Label: Custom Name Only
             custom_name = data.get('custom_name', f"{data['parent']} \u2192 {child_name}")
             lbl = QtWidgets.QLabel(f"{custom_name} ({['X','Y','Z'][data['axis']]})")
-            lbl.setStyleSheet("color: #ffa500; font-weight: bold; font-size: 11px;")
+            lbl.setStyleSheet("color: #ff9800; font-weight: bold; font-size: 11px;")
             glay.addWidget(lbl)
             
             # Slider Row

@@ -5,6 +5,7 @@ from ui.panels.align_panel import AlignPanel
 from ui.panels.joint_panel import JointPanel
 from ui.panels.matrices_panel import MatricesPanel
 from ui.panels.program_panel import ProgramPanel
+from ui.panels.simulation_panel import SimulationPanel
 from core.serial_manager import SerialManager
 import os
 import numpy as np
@@ -40,18 +41,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.hardware_bar.setContentsMargins(10, 0, 10, 0)
         
         hw_label = QtWidgets.QLabel("ESP32 HARDWARE:")
-        hw_label.setStyleSheet("color: #4ecdc4; font-weight: bold; font-size: 11px;")
+        hw_label.setStyleSheet("color: #1976d2; font-weight: bold; font-size: 11px;")
         self.hardware_bar.addWidget(hw_label)
         
         self.port_combo = QtWidgets.QComboBox()
         self.port_combo.setMinimumWidth(120)
-        self.port_combo.setStyleSheet("background-color: #2b2b2b; color: white; padding: 3px;")
+        self.port_combo.setStyleSheet("background-color: white; color: black; padding: 3px; border: 1px solid #bbb;")
         self.hardware_bar.addWidget(self.port_combo)
         
         self.refresh_ports_btn = QtWidgets.QPushButton("🔄")
         self.refresh_ports_btn.setToolTip("Refresh COM Ports")
         self.refresh_ports_btn.setFixedWidth(30)
-        self.refresh_ports_btn.setStyleSheet("background-color: #444; color: white;")
+        self.refresh_ports_btn.setStyleSheet("background-color: #e0e0e0; color: black; border: 1px solid #bbb;")
         self.refresh_ports_btn.clicked.connect(self.refresh_ports)
         self.hardware_bar.addWidget(self.refresh_ports_btn)
         
@@ -65,20 +66,46 @@ class MainWindow(QtWidgets.QMainWindow):
         
         # --- PROJECT TOOLBAR ---
         project_label = QtWidgets.QLabel("PROJECT:")
-        project_label.setStyleSheet("color: #4a90e2; font-weight: bold; font-size: 11px;")
+        project_label.setStyleSheet("color: #1976d2; font-weight: bold; font-size: 11px;")
         self.hardware_bar.addWidget(project_label)
 
         self.save_btn = QtWidgets.QPushButton("SAVE")
         self.save_btn.setFixedWidth(80)
-        self.save_btn.setStyleSheet("background-color: #3d3d3d; color: white;")
+        self.save_btn.setStyleSheet("background-color: #e0e0e0; color: black; border: 1px solid #bbb;")
         self.save_btn.clicked.connect(self.save_project)
         self.hardware_bar.addWidget(self.save_btn)
 
         self.load_btn = QtWidgets.QPushButton("OPEN")
         self.load_btn.setFixedWidth(80)
-        self.load_btn.setStyleSheet("background-color: #3d3d3d; color: white;")
+        self.load_btn.setStyleSheet("background-color: #e0e0e0; color: black; border: 1px solid #bbb;")
         self.load_btn.clicked.connect(self.load_project)
         self.hardware_bar.addWidget(self.load_btn)
+
+        # --- SIMULATION TOOLBAR ---
+        self.hardware_bar.addSpacing(20)
+        self.sim_btn = QtWidgets.QPushButton()
+        self.sim_btn.setIcon(QtGui.QIcon("assets/robotic-arm.png"))
+        self.sim_btn.setIconSize(QtCore.QSize(24, 24))
+        self.sim_btn.setToolTip("Toggle Simulation Mode")
+        self.sim_btn.setCheckable(True)
+        self.sim_btn.setFixedSize(40, 40)
+        self.sim_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f5f5f5;
+                border: 1px solid #bbb;
+                border-radius: 4px;
+            }
+            QPushButton:checked {
+                background-color: #4caf50;
+                border: 1px solid #388e3c;
+            }
+            QPushButton:hover {
+                background-color: #e0e0e0;
+            }
+        """)
+        self.sim_btn.setShortcut("Ctrl+Q")
+        self.sim_btn.clicked.connect(self.toggle_simulation)
+        self.hardware_bar.addWidget(self.sim_btn)
         
         self.overall_layout.addLayout(self.hardware_bar)
         
@@ -91,10 +118,67 @@ class MainWindow(QtWidgets.QMainWindow):
         # MAIN SPLITTER (Allows resizing Controls vs 3D View)
         self.main_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         
-        # Left Panel (Controls)
-        self.left_panel = QtWidgets.QTabWidget()
-        self.left_panel.setMinimumWidth(250)
+        # Left Panel Container
+        left_container = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left_container)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
         
+        # --- ICON NAVIGATION BAR ---
+        nav_bar = QtWidgets.QWidget()
+        nav_bar.setObjectName("nav_bar_widget")
+        nav_bar.setStyleSheet("background-color: #000000;")
+        nav_bar.setFixedHeight(60)
+        nav_layout = QtWidgets.QHBoxLayout(nav_bar)
+        nav_layout.setContentsMargins(5, 5, 5, 5)
+        nav_layout.setSpacing(5)
+        
+        # Create navigation buttons with text (no icons/emojis)
+        self.nav_buttons = []
+        nav_items = [
+            ("Links", "Manage robot links and components"),
+            ("Align", "Align components together"),
+            ("Joint", "Create and control joints"),
+            ("Matrices", "View transformation matrices"),
+            ("Code", "Program robot movements")
+        ]
+        
+        for name, tooltip in nav_items:
+            btn = QtWidgets.QPushButton(name)
+            btn.setObjectName(name)
+            btn.setToolTip(tooltip)
+            # Remove fixed size to allow text to fit, or use fixed height
+            btn.setFixedHeight(40)
+            btn.setCursor(QtCore.Qt.PointingHandCursor)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #000000;
+                    color: white;
+                    border: none;
+                    border-radius: 5px;
+                    font-size: 14px;
+                    font-weight: bold;
+                    padding: 5px 15px;
+                }
+                QPushButton:hover {
+                    background-color: #333333;
+                }
+                QPushButton:pressed {
+                    background-color: #1976d2;
+                }
+            """)
+            btn.clicked.connect(lambda checked, idx=len(self.nav_buttons): self.switch_panel(idx))
+            nav_layout.addWidget(btn)
+            self.nav_buttons.append(btn)
+        
+        nav_layout.addStretch()
+        left_layout.addWidget(nav_bar)
+        
+        # --- STACKED WIDGET FOR PANELS ---
+        self.panel_stack = QtWidgets.QStackedWidget()
+        self.panel_stack.setMinimumWidth(250)
+        
+        # Create panels
         self.links_tab = QtWidgets.QWidget()
         self.setup_links_tab()
         
@@ -103,14 +187,23 @@ class MainWindow(QtWidgets.QMainWindow):
         self.matrices_tab = MatricesPanel(self)
         self.program_tab = ProgramPanel(self)
         
-        self.left_panel.addTab(self.links_tab, "Links")
-        self.left_panel.addTab(self.align_tab, "Align")
-        self.left_panel.addTab(self.joint_tab, "Joint")
-        self.left_panel.addTab(self.matrices_tab, "Matrices")
-        self.left_panel.addTab(self.program_tab, "Code")
+        self.panel_stack.addWidget(self.links_tab)
+        self.panel_stack.addWidget(self.align_tab)
+        self.panel_stack.addWidget(self.joint_tab)
+        self.panel_stack.addWidget(self.matrices_tab)
+
+        self.panel_stack.addWidget(self.program_tab)
         
-        # Connect tab change to refresh lists
-        self.left_panel.currentChanged.connect(self.on_tab_changed)
+        self.simulation_tab = SimulationPanel(self)
+        self.panel_stack.addWidget(self.simulation_tab)
+        
+        left_layout.addWidget(self.panel_stack)
+        
+        # Set initial selection
+        self.switch_panel(0)
+        
+        # Connect panel change to refresh lists
+        self.panel_stack.currentChanged.connect(self.on_tab_changed)
         
         # Right Side - Vertical Splitter (Canvas on top, Console on bottom)
         self.right_splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
@@ -128,7 +221,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.right_splitter.setSizes([600, 150])
         
         # Add components to main horizontal splitter
-        self.main_splitter.addWidget(self.left_panel)
+        self.main_splitter.addWidget(left_container)
         self.main_splitter.addWidget(self.right_splitter)
         
         # Set initial side-to-side bias
@@ -190,6 +283,76 @@ class MainWindow(QtWidgets.QMainWindow):
         self.log(f"Synced coordinates for: {name}")
         # Re-run kinematics to ensure the whole branch moves correctly
         self.robot.update_kinematics()
+
+    def switch_panel(self, index):
+        self.panel_stack.setCurrentIndex(index)
+        
+        # Update button styles
+        for i, btn in enumerate(self.nav_buttons):
+            if i == index:
+                # Selected: Blue
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #1976d2;
+                        color: white;
+                        border: none;
+                        border-radius: 5px;
+                        font-size: 14px;
+                        font-weight: bold;
+                        padding: 5px 15px;
+                    }
+                    QPushButton:hover { background-color: #1976d2; }
+                """)
+            else:
+                # Unselected: Black
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #000000;
+                        color: white;
+                        border: none;
+                        border-radius: 5px;
+                        font-size: 14px;
+                        font-weight: bold;
+                        padding: 5px 15px;
+                    }
+                    QPushButton:hover { background-color: #333333; }
+                """)
+
+    def toggle_simulation(self, checked):
+        """Toggles between Edit Mode and Simulation Mode."""
+        if checked:
+            # Enter Simulation Mode
+            self.log("Entering Simulation Mode...")
+            
+            # Hide Navigation Bar
+            self.findChild(QtWidgets.QWidget, "nav_bar_widget").setVisible(False)
+            
+            # Switch to Simulation Panel (Index 5)
+            self.panel_stack.setCurrentWidget(self.simulation_tab)
+            self.simulation_tab.refresh_joints()
+            
+            # Disable other controls if needed
+            self.save_btn.setEnabled(False)
+            self.load_btn.setEnabled(False)
+            
+        else:
+            # Exit Simulation Mode
+            self.log("Exiting Simulation Mode...")
+            
+            # Show Navigation Bar
+            self.findChild(QtWidgets.QWidget, "nav_bar_widget").setVisible(True)
+            
+            # Switch back to previous panel (default to Links or whatever was active)
+            # For simplicity, we go back to the first tab (Links) or keep state if tracked
+            self.switch_panel(0)
+            
+            # Enable controls
+            self.save_btn.setEnabled(True)
+            self.load_btn.setEnabled(True)
+
+            # Reset Robot to initial pose if desired? 
+            # Current requirement says "robot same canvas", implying we keep state or just control it.
+            # We'll leave it in the manipulated pose for now as that's often useful.
 
     def setup_links_tab(self):
         layout = QtWidgets.QVBoxLayout(self.links_tab)
@@ -293,7 +456,7 @@ class MainWindow(QtWidgets.QMainWindow):
         
         name = item.text()
         # Switch to Joint Tab (Index 2)
-        self.left_panel.setCurrentIndex(2)
+        self.switch_panel(2)
         
         # Refresh links first to ensure combo boxes are up to date
         self.joint_tab.refresh_links()
@@ -359,54 +522,59 @@ class MainWindow(QtWidgets.QMainWindow):
                     item.setToolTip("Joint/Child Link")
 
     def apply_styles(self):
-        # Premium dark theme
+        # Premium light theme with blue, white, black, and grey
         self.setStyleSheet("""
             QMainWindow, QWidget {
-                background-color: #2b2b2b;
-                color: #e0e0e0;
+                background-color: #f5f5f5;
+                color: #212121;
                 font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             }
             QTabWidget::pane {
-                border: 1px solid #444;
+                border: 1px solid #bbb;
+                background-color: white;
             }
             QTabBar::tab {
-                background: #333;
+                background: #e0e0e0;
                 padding: 10px;
-                border: 1px solid #444;
+                border: 1px solid #bbb;
+                color: #212121;
             }
             QTabBar::tab:selected {
-                background: #4a90e2;
+                background: #1976d2;
                 color: white;
             }
             QPushButton {
-                background-color: #3d3d3d;
-                border: 1px solid #555;
+                background-color: #e0e0e0;
+                border: 1px solid #bbb;
                 padding: 8px;
                 border-radius: 4px;
+                color: #212121;
             }
             QPushButton:hover {
-                background-color: #4a90e2;
+                background-color: #1976d2;
+                color: white;
             }
             QListWidget {
-                background-color: #1e1e1e;
-                border: 1px solid #444;
+                background-color: white;
+                border: 1px solid #bbb;
+                color: #212121;
             }
             QTextEdit {
-                background-color: #1e1e1e;
-                color: #00ff00;
+                background-color: white;
+                color: #1565c0;
                 font-family: 'Consolas', monospace;
-                border: 1px solid #444;
+                border: 1px solid #bbb;
             }
             QSplitter::handle {
-                background-color: #444;
+                background-color: #bbb;
             }
             QSplitter::handle:horizontal:hover, QSplitter::handle:vertical:hover {
-                background-color: #4a90e2;
+                background-color: #1976d2;
             }
             QComboBox QAbstractItemView {
-                background-color: #2b2b2b;
-                color: white;
-                selection-background-color: #4a90e2;
+                background-color: white;
+                color: #212121;
+                selection-background-color: #1976d2;
             }
         """)
 
@@ -428,7 +596,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 
             if self.serial_mgr.connect(port):
                 self.connect_btn.setText("DISCONNECT")
-                self.connect_btn.setStyleSheet("background-color: #27ae60; color: white; font-weight: bold;")
+                self.connect_btn.setStyleSheet("background-color: #4caf50; color: white; font-weight: bold;")
         else:
             self.serial_mgr.disconnect()
             self.connect_btn.setText("CONNECT")
@@ -505,7 +673,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # This prevents accidental movement while Aligning or Creating Joints
         self.canvas.enable_drag = (index == 0)
         
-        widget = self.left_panel.widget(index)
+        widget = self.panel_stack.widget(index)
         if hasattr(widget, 'refresh_links'):
             widget.refresh_links()
         if hasattr(widget, 'update_display'):

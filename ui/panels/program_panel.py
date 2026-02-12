@@ -18,19 +18,19 @@ class ProgramPanel(QtWidgets.QWidget):
         
         self.upload_btn = QtWidgets.QPushButton("UPLOAD CODE")
         self.upload_btn.setToolTip("Run code on Hardware (ESP32)")
-        self.upload_btn.setStyleSheet("background-color: #3498db; font-weight: bold; color: white;")
+        self.upload_btn.setStyleSheet("background-color: #1976d2; font-weight: bold; color: white;")
         self.upload_btn.clicked.connect(self.upload_code)
         self.toolbar_layout.addWidget(self.upload_btn)
         
         self.run_btn = QtWidgets.QPushButton("RUN PROGRAM")
         self.run_btn.setToolTip("Run Simulation Only")
-        self.run_btn.setStyleSheet("background-color: #27ae60; font-weight: bold; color: white;")
+        self.run_btn.setStyleSheet("background-color: #4caf50; font-weight: bold; color: white;")
         self.run_btn.clicked.connect(self.run_program)
         self.toolbar_layout.addWidget(self.run_btn)
         
         self.stop_btn = QtWidgets.QPushButton("STOP")
         self.stop_btn.setToolTip("Stop execution")
-        self.stop_btn.setStyleSheet("background-color: #c0392b; font-weight: bold; color: white;")
+        self.stop_btn.setStyleSheet("background-color: #d32f2f; font-weight: bold; color: white;")
         self.stop_btn.clicked.connect(self.stop_program)
         self.toolbar_layout.addWidget(self.stop_btn)
         
@@ -39,7 +39,7 @@ class ProgramPanel(QtWidgets.QWidget):
         # --- LIVE SYNC OPTION ---
         self.sync_hw_check = QtWidgets.QCheckBox("Live Hardware Sync")
         self.sync_hw_check.setToolTip("If checked, RUN PROGRAM will also move the physical ESP32 motors.")
-        self.sync_hw_check.setStyleSheet("color: #4ecdc4; font-weight: bold;")
+        self.sync_hw_check.setStyleSheet("color: #1976d2; font-weight: bold;")
         self.toolbar_layout.addWidget(self.sync_hw_check)
         
         layout.addLayout(self.toolbar_layout)

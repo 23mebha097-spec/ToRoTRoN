@@ -30,21 +30,25 @@ class JointPanel(QtWidgets.QWidget):
         self.objects_list = QtWidgets.QListWidget()
         self.objects_list.setStyleSheet("""
             QListWidget {
-                background-color: #1e1e1e;
-                color: white;
+                background-color: white;
+                color: #212121;
                 border: none;
                 font-size: 14px;
                 padding: 5px;
             }
             QListWidget::item {
                 padding: 8px;
-                border-bottom: 1px solid #333;
+                border-bottom: 1px solid #e0e0e0;
             }
             QListWidget::item:hover {
-                background-color: #2d2d2d;
+                background-color: #f5f5f5;
             }
             QListWidget::item:selected {
-                background-color: #3d3d3d;
+                background-color: #1976d2;
+                color: white;
+            }
+            QListWidget::item:selected:hover {
+                background-color: #1565c0;
             }
         """)
         self.objects_list.itemClicked.connect(self.on_object_clicked)
@@ -55,7 +59,7 @@ class JointPanel(QtWidgets.QWidget):
         
         # --- ROTATION AXIS & LIMITS SECTION (appears after CREATE JOINT) ---
         self.rotation_section = QtWidgets.QWidget()
-        self.rotation_section.setStyleSheet("background-color: #1e1e1e; padding: 10px;")
+        self.rotation_section.setStyleSheet("background-color: white; padding: 10px; border: 1px solid #e0e0e0;")
         self.rotation_section.setVisible(False)
         
         rot_layout = QtWidgets.QVBoxLayout(self.rotation_section)
@@ -63,22 +67,22 @@ class JointPanel(QtWidgets.QWidget):
         
         # Section header
         rot_header = QtWidgets.QLabel("3. ROTATION AXIS & LIMITS")
-        rot_header.setStyleSheet("color: #4ecdc4; font-size: 14px; font-weight: bold; padding: 5px;")
+        rot_header.setStyleSheet("color: #1976d2; font-size: 14px; font-weight: bold; padding: 5px;")
         rot_layout.addWidget(rot_header)
         
         # Joint name input
         name_layout = QtWidgets.QHBoxLayout()
         name_label = QtWidgets.QLabel("Joint Name:")
-        name_label.setStyleSheet("color: #aaa; font-size: 12px;")
+        name_label.setStyleSheet("color: #616161; font-size: 12px;")
         name_layout.addWidget(name_label)
         
         self.joint_name_input = QtWidgets.QLineEdit()
         self.joint_name_input.setPlaceholderText("e.g. Shoulder_Pivot")
         self.joint_name_input.setStyleSheet("""
             QLineEdit {
-                background-color: #2b2b2b;
-                color: #4ecdc4;
-                border: 1px solid #555;
+                background-color: white;
+                color: #1976d2;
+                border: 1px solid #bbb;
                 padding: 5px;
                 border-radius: 3px;
                 font-weight: bold;
@@ -89,24 +93,24 @@ class JointPanel(QtWidgets.QWidget):
         
         # Axis selection
         axis_label = QtWidgets.QLabel("Select rotation axis:")
-        axis_label.setStyleSheet("color: #aaa; font-size: 12px; padding: 5px;")
+        axis_label.setStyleSheet("color: #616161; font-size: 12px; padding: 5px;")
         rot_layout.addWidget(axis_label)
         
         axis_buttons_row = QtWidgets.QHBoxLayout()
         self.axis_group = QtWidgets.QButtonGroup()
         
         self.axis_x_radio = QtWidgets.QRadioButton("X Axis")
-        self.axis_x_radio.setStyleSheet("color: #ff6b6b; font-size: 12px;")
+        self.axis_x_radio.setStyleSheet("color: #d32f2f; font-size: 12px;")
         self.axis_group.addButton(self.axis_x_radio, 0)
         axis_buttons_row.addWidget(self.axis_x_radio)
         
         self.axis_y_radio = QtWidgets.QRadioButton("Y Axis")
-        self.axis_y_radio.setStyleSheet("color: #4ecdc4; font-size: 12px;")
+        self.axis_y_radio.setStyleSheet("color: #1976d2; font-size: 12px;")
         self.axis_group.addButton(self.axis_y_radio, 1)
         axis_buttons_row.addWidget(self.axis_y_radio)
         
         self.axis_z_radio = QtWidgets.QRadioButton("Z Axis")
-        self.axis_z_radio.setStyleSheet("color: #6bb6ff; font-size: 12px;")
+        self.axis_z_radio.setStyleSheet("color: #1565c0; font-size: 12px;")
         self.axis_z_radio.setChecked(True)  # Default to Z
         self.axis_group.addButton(self.axis_z_radio, 2)
         axis_buttons_row.addWidget(self.axis_z_radio)
@@ -115,30 +119,30 @@ class JointPanel(QtWidgets.QWidget):
         
         # Rotation limits
         limits_label = QtWidgets.QLabel("Rotation limits (degrees):")
-        limits_label.setStyleSheet("color: #aaa; font-size: 12px; padding: 5px;")
+        limits_label.setStyleSheet("color: #616161; font-size: 12px; padding: 5px;")
         rot_layout.addWidget(limits_label)
         
         limits_row = QtWidgets.QHBoxLayout()
         
         min_label = QtWidgets.QLabel("Min:")
-        min_label.setStyleSheet("color: #aaa; font-size: 11px;")
+        min_label.setStyleSheet("color: #616161; font-size: 11px;")
         limits_row.addWidget(min_label)
         
         self.min_limit_spin = QtWidgets.QDoubleSpinBox()
         self.min_limit_spin.setRange(-360, 360)
         self.min_limit_spin.setValue(-180)
-        self.min_limit_spin.setStyleSheet("background-color: #2b2b2b; color: white; border: 1px solid #555; padding: 5px;")
+        self.min_limit_spin.setStyleSheet("background-color: white; color: #212121; border: 1px solid #bbb; padding: 5px;")
         self.min_limit_spin.valueChanged.connect(self.update_slider_range)
         limits_row.addWidget(self.min_limit_spin)
         
         max_label = QtWidgets.QLabel("Max:")
-        max_label.setStyleSheet("color: #aaa; font-size: 11px;")
+        max_label.setStyleSheet("color: #616161; font-size: 11px;")
         limits_row.addWidget(max_label)
         
         self.max_limit_spin = QtWidgets.QDoubleSpinBox()
         self.max_limit_spin.setRange(-360, 360)
         self.max_limit_spin.setValue(180)
-        self.max_limit_spin.setStyleSheet("background-color: #2b2b2b; color: white; border: 1px solid #555; padding: 5px;")
+        self.max_limit_spin.setStyleSheet("background-color: white; color: #212121; border: 1px solid #bbb; padding: 5px;")
         self.max_limit_spin.valueChanged.connect(self.update_slider_range)
         limits_row.addWidget(self.max_limit_spin)
         
@@ -146,7 +150,7 @@ class JointPanel(QtWidgets.QWidget):
         
         # Test Rotation Slider
         test_label = QtWidgets.QLabel("Test rotation:")
-        test_label.setStyleSheet("color: #aaa; font-size: 12px; padding: 5px;")
+        test_label.setStyleSheet("color: #616161; font-size: 12px; padding: 5px;")
         rot_layout.addWidget(test_label)
         
         slider_row = QtWidgets.QHBoxLayout()
@@ -156,12 +160,12 @@ class JointPanel(QtWidgets.QWidget):
         self.rotation_slider.setValue(0)
         self.rotation_slider.setStyleSheet("""
             QSlider::groove:horizontal {
-                background: #2b2b2b;
+                background: #e0e0e0;
                 height: 8px;
                 border-radius: 4px;
             }
             QSlider::handle:horizontal {
-                background: #4ecdc4;
+                background: #1976d2;
                 width: 18px;
                 margin: -5px 0;
                 border-radius: 9px;
@@ -178,9 +182,9 @@ class JointPanel(QtWidgets.QWidget):
         self.rotation_spinbox.setDecimals(1)
         self.rotation_spinbox.setStyleSheet("""
             QDoubleSpinBox {
-                background-color: #2b2b2b;
-                color: #4ecdc4;
-                border: 2px solid #4ecdc4;
+                background-color: white;
+                color: #1976d2;
+                border: 2px solid #1976d2;
                 border-radius: 3px;
                 padding: 5px;
                 font-size: 12px;
@@ -216,7 +220,7 @@ class JointPanel(QtWidgets.QWidget):
         
         # Parent/Child Selection Buttons
         buttons_container = QtWidgets.QWidget()
-        buttons_container.setStyleSheet("background-color: #1e1e1e; padding: 10px;")
+        buttons_container.setStyleSheet("background-color: white; padding: 10px; border: 1px solid #e0e0e0;")
         buttons_layout = QtWidgets.QHBoxLayout(buttons_container)
         buttons_layout.setSpacing(10)
         
@@ -224,21 +228,21 @@ class JointPanel(QtWidgets.QWidget):
         self.parent_btn = QtWidgets.QPushButton("parent object")
         self.parent_btn.setStyleSheet("""
             QPushButton {
-                background-color: #ff9999;
+                background-color: #ffcdd2;
                 color: #000;
-                border: 2px solid #ff6b6b;
+                border: 2px solid #d32f2f;
                 border-radius: 5px;
                 padding: 15px;
                 font-size: 13px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #ffb3b3;
+                background-color: #ef9a9a;
             }
             QPushButton:disabled {
-                background-color: #4d4d4d;
-                color: #888;
-                border-color: #666;
+                background-color: #e0e0e0;
+                color: #9e9e9e;
+                border-color: #bbb;
             }
         """)
         self.parent_btn.clicked.connect(self.set_as_parent)
@@ -249,21 +253,21 @@ class JointPanel(QtWidgets.QWidget):
         self.child_btn = QtWidgets.QPushButton("child object")
         self.child_btn.setStyleSheet("""
             QPushButton {
-                background-color: #b3d9ff;
+                background-color: #bbdefb;
                 color: #000;
-                border: 2px solid #6bb6ff;
+                border: 2px solid #1976d2;
                 border-radius: 5px;
                 padding: 15px;
                 font-size: 13px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #cce5ff;
+                background-color: #90caf9;
             }
             QPushButton:disabled {
-                background-color: #4d4d4d;
-                color: #888;
-                border-color: #666;
+                background-color: #e0e0e0;
+                color: #9e9e9e;
+                border-color: #bbb;
             }
         """)
         self.child_btn.clicked.connect(self.set_as_child)
@@ -274,7 +278,7 @@ class JointPanel(QtWidgets.QWidget):
         
         # --- UNDO/REDO BUTTONS ---
         undo_redo_container = QtWidgets.QWidget()
-        undo_redo_container.setStyleSheet("background-color: #1e1e1e; padding: 5px;")
+        undo_redo_container.setStyleSheet("background-color: white; padding: 5px; border: 1px solid #e0e0e0;")
         undo_redo_layout = QtWidgets.QHBoxLayout(undo_redo_container)
         undo_redo_layout.setSpacing(10)
         
@@ -316,7 +320,7 @@ class JointPanel(QtWidgets.QWidget):
         
         # --- JOINT CONTROL SECTION (appears when clicking jointed object) ---
         self.joint_control_section = QtWidgets.QWidget()
-        self.joint_control_section.setStyleSheet("background-color: #1e1e1e; padding: 10px;")
+        self.joint_control_section.setStyleSheet("background-color: white; padding: 10px; border: 1px solid #e0e0e0;")
         self.joint_control_section.setVisible(False)
         
         jc_layout = QtWidgets.QVBoxLayout(self.joint_control_section)
@@ -329,12 +333,12 @@ class JointPanel(QtWidgets.QWidget):
         
         # Joint info
         self.joint_info_label = QtWidgets.QLabel("No joint selected")
-        self.joint_info_label.setStyleSheet("color: #aaa; font-size: 11px; padding: 3px;")
+        self.joint_info_label.setStyleSheet("color: #616161; font-size: 11px; padding: 3px;")
         jc_layout.addWidget(self.joint_info_label)
         
         # Control slider
         jc_slider_label = QtWidgets.QLabel("Rotation:")
-        jc_slider_label.setStyleSheet("color: #aaa; font-size: 12px; padding: 3px;")
+        jc_slider_label.setStyleSheet("color: #616161; font-size: 12px; padding: 3px;")
         jc_layout.addWidget(jc_slider_label)
         
         jc_slider_row = QtWidgets.QHBoxLayout()
@@ -342,7 +346,7 @@ class JointPanel(QtWidgets.QWidget):
         self.joint_control_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.joint_control_slider.setStyleSheet("""
             QSlider::groove:horizontal {
-                background: #2b2b2b;
+                background: #e0e0e0;
                 height: 8px;
                 border-radius: 4px;
             }
@@ -361,7 +365,7 @@ class JointPanel(QtWidgets.QWidget):
         self.joint_control_spinbox.setDecimals(1)
         self.joint_control_spinbox.setStyleSheet("""
             QDoubleSpinBox {
-                background-color: #2b2b2b;
+                background-color: white;
                 color: #ff9800;
                 border: 2px solid #ff9800;
                 border-radius: 3px;
@@ -380,23 +384,23 @@ class JointPanel(QtWidgets.QWidget):
         
         # --- 4. CREATED JOINTS SECTION ---
         header_joints = QtWidgets.QLabel("4. CREATED JOINTS")
-        header_joints.setStyleSheet("color: #4ecdc4; font-size: 14px; font-weight: bold; margin-top: 20px; padding: 5px;")
+        header_joints.setStyleSheet("color: #1976d2; font-size: 14px; font-weight: bold; margin-top: 20px; padding: 5px;")
         layout.addWidget(header_joints)
         
         self.joints_history_list = QtWidgets.QListWidget()
         self.joints_history_list.setStyleSheet("""
             QListWidget {
-                background-color: #1a1a1a;
-                border: 1px solid #333;
+                background-color: white;
+                border: 1px solid #e0e0e0;
                 border-radius: 5px;
                 min-height: 200px;
             }
             QListWidget::item {
-                border-bottom: 1px solid #222;
+                border-bottom: 1px solid #e0e0e0;
                 background-color: transparent;
             }
             QListWidget::item:selected {
-                background-color: #2a2a2a;
+                background-color: #e3f2fd;
             }
         """)
         layout.addWidget(self.joints_history_list)
@@ -421,7 +425,7 @@ class JointPanel(QtWidgets.QWidget):
             # Label: Custom Name Only
             display_name = data.get('custom_name', f"{data['parent']} \u2192 {child_name}")
             label = QtWidgets.QLabel(display_name)
-            label.setStyleSheet("color: #ffffff; font-size: 13px; font-weight: bold;")
+            label.setStyleSheet("color: #212121; font-size: 13px; font-weight: bold;")
             item_layout.addWidget(label)
             
             item_layout.addStretch()
@@ -429,7 +433,7 @@ class JointPanel(QtWidgets.QWidget):
             # Axis/Limits info small
             axis_names = {0: "X", 1: "Y", 2: "Z"}
             info = QtWidgets.QLabel(f"Axis: {axis_names[data['axis']]}")
-            info.setStyleSheet("color: #888; font-size: 11px; margin-right: 5px;")
+            info.setStyleSheet("color: #757575; font-size: 11px; margin-right: 5px;")
             item_layout.addWidget(info)
             
             # Delete Button
@@ -438,17 +442,17 @@ class JointPanel(QtWidgets.QWidget):
             del_btn.setCursor(QtCore.Qt.PointingHandCursor)
             del_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #442222;
-                    color: #ff8888;
-                    border: 1px solid #663333;
+                    background-color: #ffebee;
+                    color: #d32f2f;
+                    border: 1px solid #ffcdd2;
                     border-radius: 12px;
                     font-weight: bold;
                     font-size: 12px;
                 }
                 QPushButton:hover {
-                    background-color: #cc0000;
+                    background-color: #d32f2f;
                     color: white;
-                    border: 1px solid #ff4444;
+                    border: 1px solid #d32f2f;
                 }
             """)
             del_btn.clicked.connect(lambda checked, name=child_name: self.delete_joint(name))
@@ -985,19 +989,19 @@ class JointPanel(QtWidgets.QWidget):
             if name in self.joints:
                 # Jointed objects get orange color
                 item.setForeground(QtGui.QColor("#ff9800"))  # Orange for jointed
-                item.setBackground(QtGui.QColor("#3d2d1f"))  # Dark orange background
+                item.setBackground(QtGui.QColor("#fff3e0"))  # Light orange background
             elif name == self.parent_object:
-                item.setForeground(QtGui.QColor("#ffffff"))  # White text for parent with checkmark
-                item.setBackground(QtGui.QColor("#3d2020"))  # Dark red background
+                item.setForeground(QtGui.QColor("#d32f2f"))  # Red text for parent with checkmark
+                item.setBackground(QtGui.QColor("#ffebee"))  # Light red background
             elif name == self.child_object:
-                item.setForeground(QtGui.QColor("#888888"))  # Gray text for child with checkmark
-                item.setBackground(QtGui.QColor("#1a2d3d"))  # Dark blue background
+                item.setForeground(QtGui.QColor("#1976d2"))  # Blue text for child with checkmark
+                item.setBackground(QtGui.QColor("#e3f2fd"))  # Light blue background
             else:
                 # Default alternating colors
                 index = list(self.mw.robot.links.keys()).index(name)
                 if index % 2 == 0:
-                    item.setForeground(QtGui.QColor("#ff6b6b"))
+                    item.setForeground(QtGui.QColor("#d32f2f"))  # Red
                 else:
-                    item.setForeground(QtGui.QColor("#4ecdc4"))
+                    item.setForeground(QtGui.QColor("#1976d2"))  # Blue
             
             self.objects_list.addItem(item)

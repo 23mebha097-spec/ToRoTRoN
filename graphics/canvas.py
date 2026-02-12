@@ -14,8 +14,8 @@ class RobotCanvas(QtWidgets.QWidget):
         self.plotter = QtInteractor(self)
         self.layout.addWidget(self.plotter.interactor)
         
-        # Restore the Premium Dark environment
-        self.plotter.set_background("dimgray")
+        # Light theme environment
+        self.plotter.set_background("white")
         self.plotter.add_axes()
         
         # Bounded grid with simplified labels
