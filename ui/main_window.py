@@ -36,8 +36,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.central_widget = QtWidgets.QWidget()
         self.setCentralWidget(self.central_widget)
         self.overall_layout = QtWidgets.QVBoxLayout(self.central_widget)
-        self.overall_layout.setContentsMargins(5, 5, 5, 5)
-        self.overall_layout.setSpacing(5)
+        # Increased bottom padding to 120 for taskbar clearance as requested
+        # Also added consistent 10px margins for all other sides
+        self.overall_layout.setContentsMargins(10, 10, 10, 120) 
+        self.overall_layout.setSpacing(10)
         
         # --- HARDWARE TOOLBAR ---
         self.hardware_bar = QtWidgets.QHBoxLayout()
@@ -121,11 +123,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # MAIN SPLITTER (Allows resizing Controls vs 3D View)
         self.main_splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         
-        # Left Panel Container
+        # Left Panel Container with internal padding for better spacing
         left_container = QtWidgets.QWidget()
         left_layout = QtWidgets.QVBoxLayout(left_container)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(0)
+        left_layout.setContentsMargins(5, 5, 5, 10) 
+        left_layout.setSpacing(8)
         
         # --- ICON NAVIGATION BAR ---
         nav_bar = QtWidgets.QWidget()
@@ -145,6 +147,27 @@ class MainWindow(QtWidgets.QMainWindow):
             ("Matrices", "View transformation matrices"),
             ("Code", "Program robot movements")
         ]
+        
+        # Ensure panel_stack is initialized before buttons are connected
+        self.panel_stack = QtWidgets.QStackedWidget()
+        self.panel_stack.setMinimumWidth(280)
+        
+        # Create panels
+        self.links_tab = QtWidgets.QWidget()
+        self.setup_links_tab()
+        
+        self.align_tab = AlignPanel(self)
+        self.joint_tab = JointPanel(self)
+        self.matrices_tab = MatricesPanel(self)
+        self.program_tab = ProgramPanel(self)
+        self.simulation_tab = SimulationPanel(self)
+        
+        self.panel_stack.addWidget(self.links_tab)
+        self.panel_stack.addWidget(self.align_tab)
+        self.panel_stack.addWidget(self.joint_tab)
+        self.panel_stack.addWidget(self.matrices_tab)
+        self.panel_stack.addWidget(self.program_tab)
+        self.panel_stack.addWidget(self.simulation_tab)
         
         for name, tooltip in nav_items:
             btn = QtWidgets.QPushButton(name)
@@ -178,29 +201,14 @@ class MainWindow(QtWidgets.QMainWindow):
         left_layout.addWidget(nav_bar)
         
         # --- STACKED WIDGET FOR PANELS ---
-        self.panel_stack = QtWidgets.QStackedWidget()
-        self.panel_stack.setMinimumWidth(250)
+        # Wrap panel_stack in a Scroll Area for responsiveness on small screens
+        self.sidebar_scroll = QtWidgets.QScrollArea()
+        self.sidebar_scroll.setWidgetResizable(True)
+        self.sidebar_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.sidebar_scroll.setWidget(self.panel_stack)
+        self.sidebar_scroll.setStyleSheet("background-color: transparent;")
         
-        # Create panels
-        self.links_tab = QtWidgets.QWidget()
-        self.setup_links_tab()
-        
-        self.align_tab = AlignPanel(self)
-        self.joint_tab = JointPanel(self)
-        self.matrices_tab = MatricesPanel(self)
-        self.program_tab = ProgramPanel(self)
-        
-        self.panel_stack.addWidget(self.links_tab)
-        self.panel_stack.addWidget(self.align_tab)
-        self.panel_stack.addWidget(self.joint_tab)
-        self.panel_stack.addWidget(self.matrices_tab)
-
-        self.panel_stack.addWidget(self.program_tab)
-        
-        self.simulation_tab = SimulationPanel(self)
-        self.panel_stack.addWidget(self.simulation_tab)
-        
-        left_layout.addWidget(self.panel_stack, 1)  # stretch=1 so panel takes all extra vertical space
+        left_layout.addWidget(self.sidebar_scroll, 1)  # stretch=1 so panel takes all extra vertical space
         
         # Set initial selection
         self.switch_panel(0)
@@ -245,55 +253,81 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # --- UNIVERSAL SPEED CONTROL ---
         speed_container = QtWidgets.QWidget()
-        speed_container.setStyleSheet("background-color: #1a1b1e; border-top: 1px solid #333;")
-        speed_container.setMaximumHeight(60)
-        speed_container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-        speed_layout = QtWidgets.QVBoxLayout(speed_container)
-        speed_layout.setContentsMargins(15, 10, 15, 10)
+        speed_container.setStyleSheet("""
+            QWidget {
+                background-color: white;
+                border-top: 2px solid #1976d2;
+            }
+        """)
+        speed_layout = QtWidgets.QHBoxLayout(speed_container)
+        speed_layout.setContentsMargins(10, 8, 10, 8)
+        speed_layout.setSpacing(10)
+        
+        speed_header = QtWidgets.QLabel("⚡ SPEED")
+        speed_header.setStyleSheet("font-weight: bold; font-size: 11px; color: #1976d2; background: transparent; border: none;")
+        speed_layout.addWidget(speed_header)
         
         self.speed_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.speed_slider.setRange(0, 100)
         self.speed_slider.setValue(self.current_speed)
-        self.speed_slider.setFixedHeight(30)
         self.speed_slider.setCursor(QtCore.Qt.PointingHandCursor)
         self.speed_slider.setStyleSheet("""
+            QSlider {
+                background: transparent;
+                border: none;
+            }
             QSlider::groove:horizontal {
-                height: 10px;
-                background: #000;
-                border-radius: 5px;
-                border: 1px solid #222;
+                height: 8px;
+                background: #f0f0f0;
+                border-radius: 4px;
+                border: 1px solid #ddd;
             }
             QSlider::sub-page:horizontal {
-                background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 #3c4cdb, stop:1 #4a90e2);
-                border-radius: 5px;
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #bbdefb, stop: 1 #1976d2);
+                border-radius: 4px;
             }
             QSlider::handle:horizontal {
-                background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, 
-                    stop:0 #5fa8ff, stop:0.2 #4a90e2, stop:0.3 #111, stop:1 #000);
-                border: 2px solid #333;
-                width: 24px;
-                height: 24px;
-                margin-top: -8px;
-                margin-bottom: -8px;
-                border-radius: 12px;
+                background: white;
+                border: 2px solid #1976d2;
+                width: 18px;
+                height: 18px;
+                margin-top: -6px;
+                margin-bottom: -6px;
+                border-radius: 9px;
             }
             QSlider::handle:horizontal:hover {
-                background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, 
-                    stop:0 #74b9ff, stop:0.2 #5fa8ff, stop:0.3 #222, stop:1 #000);
-                border: 2px solid #4a90e2;
+                background: #e3f2fd;
+                border-color: #1565c0;
             }
         """)
+        speed_layout.addWidget(self.speed_slider, 1)  # stretch=1 for slider to fill space
         
-        # Link to simple hidden spinbox to maintain existing speed logic connection
         self.speed_spin = QtWidgets.QSpinBox()
         self.speed_spin.setRange(0, 100)
         self.speed_spin.setValue(self.current_speed)
-        self.speed_spin.hide() 
+        self.speed_spin.setSuffix("%")
+        self.speed_spin.setFixedWidth(65)
+        self.speed_spin.setStyleSheet("""
+            QSpinBox {
+                background: white;
+                color: #1976d2;
+                border: 2px solid #1976d2;
+                border-radius: 4px;
+                padding: 3px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                background: #e3f2fd;
+                border: none;
+                width: 16px;
+            }
+        """)
+        speed_layout.addWidget(self.speed_spin)
         
         self.speed_slider.valueChanged.connect(self.on_speed_change)
         self.speed_spin.valueChanged.connect(self.on_speed_change)
-        speed_layout.addWidget(self.speed_slider)
         
         left_layout.addWidget(speed_container)
 
@@ -432,6 +466,9 @@ class MainWindow(QtWidgets.QMainWindow):
             
             # Remove any speed overlay from canvas
             self.canvas.plotter.remove_actor("speed_overlay")
+            # Clear rotation disc overlays and ghost trails
+            self.canvas.clear_rotation_discs()
+            self.canvas.clear_joint_ghosts()
             self.canvas.plotter.render()
 
     def on_speed_change(self, value):

@@ -140,6 +140,8 @@ class SimulationPanel(QtWidgets.QWidget):
             self.refresh_matrices()
 
     def refresh_joints(self):
+        # Reset ghost angle tracking dict on each refresh
+        self._last_ghost_angle = {}  # joint_name -> last angle a ghost was snapped
         # Clear existing items in Joint View
         while self.scroll_layout.count():
             item = self.scroll_layout.takeAt(0)
@@ -178,6 +180,31 @@ class SimulationPanel(QtWidgets.QWidget):
             slider.setMinimum(int(joint.min_limit))
             slider.setMaximum(int(joint.max_limit))
             slider.setValue(int(joint.current_value))
+            slider.setCursor(QtCore.Qt.PointingHandCursor)
+            slider.setStyleSheet("""
+                QSlider::groove:horizontal {
+                    height: 8px;
+                    background: #f0f0f0;
+                    border-radius: 4px;
+                    border: 1px solid #ddd;
+                }
+                QSlider::sub-page:horizontal {
+                    background: #bbdefb;
+                    border-radius: 4px;
+                }
+                QSlider::handle:horizontal {
+                    background: white;
+                    border: 2px solid #1976d2;
+                    width: 16px;
+                    height: 16px;
+                    margin-top: -5px;
+                    margin-bottom: -5px;
+                    border-radius: 8px;
+                }
+                QSlider::handle:horizontal:hover {
+                    background: #e3f2fd;
+                }
+            """)
             
             slider_layout.addWidget(slider)
             
@@ -287,7 +314,43 @@ class SimulationPanel(QtWidgets.QWidget):
             
             # Update Graphics
             self.main_window.canvas.update_transforms(self.main_window.robot)
-            
+
+            # --- ROTATION DISC OVERLAY (reference-image style rings) ---
+            try:
+                import numpy as _np
+                _pw = joint.parent_link.t_world
+                _wc = (_pw @ _np.append(joint.origin, 1.0))[:3]
+                _wa = _pw[:3, :3] @ joint.axis
+                # Use joint's child link color (lightened for disc visibility)
+                _raw_color = getattr(joint.child_link, 'color', '#00bcd4') or '#00bcd4'
+                self.main_window.canvas.show_rotation_disc(
+                    center=_wc, axis=_wa, radius=0.35,
+                    name='rotation_disc', color=_raw_color
+                )
+            except Exception:
+                pass
+
+            # --- GHOST SHADOW TRAIL ---
+            # Sample a ghost every GHOST_STEP degrees of movement
+            try:
+                GHOST_STEP = 12  # degrees between ghost snapshots
+                _last = self._last_ghost_angle.get(name, None)
+                _cur_angle = float(value)
+                if _last is None or abs(_cur_angle - _last) >= GHOST_STEP:
+                    _link = joint.child_link
+                    import numpy as _np2
+                    import copy
+                    _mesh = _link.mesh
+                    _transform = _np2.copy(_link.t_world)
+                    _col = getattr(_link, 'color', '#888888') or '#888888'
+                    self.main_window.canvas.add_joint_ghost(
+                        mesh=_mesh, transform=_transform,
+                        color=_col, opacity=0.20
+                    )
+                    self._last_ghost_angle[name] = _cur_angle
+            except Exception:
+                pass
+
             # Show Speed Overlay on 3D Canvas
             self.main_window.show_speed_overlay()
             

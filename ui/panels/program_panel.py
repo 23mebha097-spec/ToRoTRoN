@@ -188,6 +188,32 @@ WAIT 0.5
                                 joint.current_value += step_inc
                                 self.mw.robot.update_kinematics()
                                 self.mw.canvas.update_transforms(self.mw.robot)
+                                # Show rotation disc overlay
+                                try:
+                                    import numpy as _np
+                                    _pw = joint.parent_link.t_world
+                                    _wc = (_pw @ _np.append(joint.origin, 1.0))[:3]
+                                    _wa = _pw[:3, :3] @ joint.axis
+                                    _col = getattr(joint.child_link, 'color', '#00bcd4') or '#00bcd4'
+                                    self.mw.canvas.show_rotation_disc(
+                                        center=_wc, axis=_wa, radius=0.35,
+                                        name='rotation_disc', color=_col
+                                    )
+                                except Exception:
+                                    pass
+                                # Ghost shadow every ~12 deg
+                                try:
+                                    _l = joint.child_link
+                                    import numpy as _np2
+                                    import copy
+                                    self.mw.canvas.add_joint_ghost(
+                                        mesh=_l.mesh,
+                                        transform=_np2.copy(_l.t_world),
+                                        color=getattr(_l, 'color', '#888888') or '#888888',
+                                        opacity=0.20
+                                    )
+                                except Exception:
+                                    pass
                                 if hw_sync:
                                     self.mw.serial_mgr.send_command(j_name, joint.current_value, speed)
                                 QtWidgets.QApplication.processEvents()
@@ -198,6 +224,19 @@ WAIT 0.5
                     joint.current_value = target_val
                     self.mw.robot.update_kinematics()
                     self.mw.canvas.update_transforms(self.mw.robot)
+                    # Show rotation disc at final position
+                    try:
+                        import numpy as _np
+                        _pw = joint.parent_link.t_world
+                        _wc = (_pw @ _np.append(joint.origin, 1.0))[:3]
+                        _wa = _pw[:3, :3] @ joint.axis
+                        _col = getattr(joint.child_link, 'color', '#00bcd4') or '#00bcd4'
+                        self.mw.canvas.show_rotation_disc(
+                            center=_wc, axis=_wa, radius=0.35,
+                            name='rotation_disc', color=_col
+                        )
+                    except Exception:
+                        pass
                     if hasattr(self.mw, 'show_speed_overlay'):
                         self.mw.show_speed_overlay()
                     if hw_sync:
