@@ -200,7 +200,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.simulation_tab = SimulationPanel(self)
         self.panel_stack.addWidget(self.simulation_tab)
         
-        left_layout.addWidget(self.panel_stack)
+        left_layout.addWidget(self.panel_stack, 1)  # stretch=1 so panel takes all extra vertical space
         
         # Set initial selection
         self.switch_panel(0)
@@ -245,73 +245,52 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # --- UNIVERSAL SPEED CONTROL ---
         speed_container = QtWidgets.QWidget()
-        speed_container.setStyleSheet("background-color: #f5f5f5; border-top: 1px solid #ddd; padding: 10px;")
+        speed_container.setStyleSheet("background-color: #1a1b1e; border-top: 1px solid #333;")
+        speed_container.setMaximumHeight(60)
+        speed_container.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
         speed_layout = QtWidgets.QVBoxLayout(speed_container)
-        
-        speed_header = QtWidgets.QLabel("GLOBAL SPEED CONTROL")
-        speed_header.setStyleSheet("font-weight: bold; font-size: 11px; color: #666;")
-        speed_layout.addWidget(speed_header)
-        
-        labels_layout = QtWidgets.QHBoxLayout()
-        label_0 = QtWidgets.QLabel("0%")
-        label_0.setStyleSheet("font-size: 10px; color: #888;")
-        label_100 = QtWidgets.QLabel("100%")
-        label_100.setStyleSheet("font-size: 10px; color: #888;")
-        
-        self.speed_val_label = QtWidgets.QLabel("50%")
-        self.speed_val_label.setStyleSheet("font-weight: bold; color: #1976d2; font-size: 12px;")
-        
-        labels_layout.addWidget(label_0)
-        labels_layout.addStretch()
-        
-        # Manual Input Spinbox
-        self.speed_spin = QtWidgets.QSpinBox()
-        self.speed_spin.setRange(0, 100)
-        self.speed_spin.setValue(self.current_speed)
-        self.speed_spin.setSuffix("%")
-        self.speed_spin.setFixedWidth(60)
-        self.speed_spin.setStyleSheet("""
-            QSpinBox {
-                background: white;
-                color: #1976d2;
-                border: 1px solid #1976d2;
-                border-radius: 3px;
-                padding: 2px;
-                font-weight: bold;
-            }
-        """)
-        labels_layout.addWidget(self.speed_spin)
-        
-        labels_layout.addStretch()
-        labels_layout.addWidget(label_100)
-        speed_layout.addLayout(labels_layout)
+        speed_layout.setContentsMargins(15, 10, 15, 10)
         
         self.speed_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.speed_slider.setRange(0, 100)
         self.speed_slider.setValue(self.current_speed)
-        self.speed_slider.setFixedHeight(25)
+        self.speed_slider.setFixedHeight(30)
         self.speed_slider.setCursor(QtCore.Qt.PointingHandCursor)
         self.speed_slider.setStyleSheet("""
             QSlider::groove:horizontal {
-                height: 12px;
-                background: #e0e0e0;
-                border-radius: 6px;
+                height: 10px;
+                background: #000;
+                border-radius: 5px;
+                border: 1px solid #222;
             }
             QSlider::sub-page:horizontal {
-                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
-                    stop: 0 #bbdefb, stop: 1 #1976d2);
-                border-radius: 6px;
+                background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 #3c4cdb, stop:1 #4a90e2);
+                border-radius: 5px;
             }
             QSlider::handle:horizontal {
-                background: white;
-                border: 2px solid #1976d2;
-                width: 20px;
-                height: 20px;
-                margin-top: -5px;
-                margin-bottom: -5px;
-                border-radius: 10px;
+                background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, 
+                    stop:0 #5fa8ff, stop:0.2 #4a90e2, stop:0.3 #111, stop:1 #000);
+                border: 2px solid #333;
+                width: 24px;
+                height: 24px;
+                margin-top: -8px;
+                margin-bottom: -8px;
+                border-radius: 12px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5, 
+                    stop:0 #74b9ff, stop:0.2 #5fa8ff, stop:0.3 #222, stop:1 #000);
+                border: 2px solid #4a90e2;
             }
         """)
+        
+        # Link to simple hidden spinbox to maintain existing speed logic connection
+        self.speed_spin = QtWidgets.QSpinBox()
+        self.speed_spin.setRange(0, 100)
+        self.speed_spin.setValue(self.current_speed)
+        self.speed_spin.hide() 
+        
         self.speed_slider.valueChanged.connect(self.on_speed_change)
         self.speed_spin.valueChanged.connect(self.on_speed_change)
         speed_layout.addWidget(self.speed_slider)
