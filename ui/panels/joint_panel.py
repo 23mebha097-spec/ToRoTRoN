@@ -947,10 +947,15 @@ class JointPanel(QtWidgets.QWidget):
             if hasattr(self.mw, 'serial_mgr'):
                 # Use joint_id (e.g. joint_1) instead of display name for code consistency
                 joint_id = self.joints[child_name].get('joint_id', child_name)
-                # Send with default speed 0 for manual slider movement
-                self.mw.serial_mgr.send_command(joint_id, angle_deg, speed=0)
+                # Send with current global speed
+                speed = float(getattr(self.mw, 'current_speed', 0))
+                self.mw.serial_mgr.send_command(joint_id, angle_deg, speed=speed)
                 
-            # 6. Push updated transforms to the 3D viewer
+            # 6. Show Speed Overlay on 3D Canvas
+            if hasattr(self.mw, 'show_speed_overlay'):
+                self.mw.show_speed_overlay()
+                
+            # 7. Push updated transforms to the 3D viewer
             self.mw.canvas.update_transforms(self.mw.robot)
 
     def reset_joint_ui(self):

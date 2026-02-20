@@ -171,12 +171,8 @@ class SimulationPanel(QtWidgets.QWidget):
             sub_header = QtWidgets.QLabel(f"{joint.parent_link.name} -> {joint.child_link.name}")
             sub_header.setStyleSheet("font-size: 10px; color: #666;")
             layout.addWidget(sub_header)
-            
             # Slider
             slider_layout = QtWidgets.QHBoxLayout()
-            val_label = QtWidgets.QLabel(f"{joint.current_value:.1f}°")
-            val_label.setFixedWidth(50)
-            val_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
             
             slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
             slider.setMinimum(int(joint.min_limit))
@@ -184,7 +180,25 @@ class SimulationPanel(QtWidgets.QWidget):
             slider.setValue(int(joint.current_value))
             
             slider_layout.addWidget(slider)
-            slider_layout.addWidget(val_label)
+            
+            # Manual Spinbox
+            val_spin = QtWidgets.QDoubleSpinBox()
+            val_spin.setRange(joint.min_limit, joint.max_limit)
+            val_spin.setValue(joint.current_value)
+            val_spin.setSuffix("°")
+            val_spin.setDecimals(1)
+            val_spin.setFixedWidth(70)
+            val_spin.setStyleSheet("""
+                QDoubleSpinBox {
+                    background: white;
+                    color: #1976d2;
+                    border: 1px solid #1976d2;
+                    border-radius: 3px;
+                    padding: 2px;
+                    font-weight: bold;
+                }
+            """)
+            slider_layout.addWidget(val_spin)
             
             layout.addLayout(slider_layout)
             
@@ -199,11 +213,12 @@ class SimulationPanel(QtWidgets.QWidget):
             
             self.sliders[name] = {
                 'slider': slider,
-                'label': val_label,
+                'spinbox': val_spin,
                 'joint': joint
             }
             
             slider.valueChanged.connect(lambda val, n=name: self.on_slider_change(n, val))
+            val_spin.valueChanged.connect(lambda val, n=name: self.on_slider_change(n, val))
 
     def refresh_matrices(self):
         # Clear existing items in Matrices View
@@ -257,15 +272,31 @@ class SimulationPanel(QtWidgets.QWidget):
             # Update Joint Model
             joint.current_value = float(value)
             
-            # Update Label
-            data['label'].setText(f"{value:.1f}°")
+            # Update Spinbox and Slider without infinite loop
+            if data['slider'].value() != int(value):
+                data['slider'].blockSignals(True)
+                data['slider'].setValue(int(value))
+                data['slider'].blockSignals(False)
+            if data['spinbox'].value() != float(value):
+                data['spinbox'].blockSignals(True)
+                data['spinbox'].setValue(float(value))
+                data['spinbox'].blockSignals(False)
             
             # Update Robot Kinematics
             self.main_window.robot.update_kinematics()
             
             # Update Graphics
             self.main_window.canvas.update_transforms(self.main_window.robot)
+            
+            # Show Speed Overlay on 3D Canvas
+            self.main_window.show_speed_overlay()
+            
             self.main_window.canvas.plotter.render()
+            
+            # Send command to hardware with current speed
+            if hasattr(self.main_window, 'serial_mgr') and self.main_window.serial_mgr.is_connected:
+                joint_id = joint.joint_id
+                self.main_window.serial_mgr.send_command(joint_id, float(value), speed=float(self.main_window.current_speed))
             
             # Update Matrices if visible
             if self.stack.currentIndex() == 1:

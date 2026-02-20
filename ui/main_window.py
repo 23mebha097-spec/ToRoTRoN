@@ -24,6 +24,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.robot = Robot()
         self.serial_mgr = SerialManager(self)
         self.alignment_cache = {} # Cache for storing alignment points: {(parent, child): point}
+        self.current_speed = 50   # Global speed setting (0-100%)
         self.init_ui()
         self.apply_styles()
         
@@ -242,6 +243,81 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gen_code_btn.clicked.connect(self.on_generate_code)
         left_layout.addWidget(self.gen_code_btn)
 
+        # --- UNIVERSAL SPEED CONTROL ---
+        speed_container = QtWidgets.QWidget()
+        speed_container.setStyleSheet("background-color: #f5f5f5; border-top: 1px solid #ddd; padding: 10px;")
+        speed_layout = QtWidgets.QVBoxLayout(speed_container)
+        
+        speed_header = QtWidgets.QLabel("GLOBAL SPEED CONTROL")
+        speed_header.setStyleSheet("font-weight: bold; font-size: 11px; color: #666;")
+        speed_layout.addWidget(speed_header)
+        
+        labels_layout = QtWidgets.QHBoxLayout()
+        label_0 = QtWidgets.QLabel("0%")
+        label_0.setStyleSheet("font-size: 10px; color: #888;")
+        label_100 = QtWidgets.QLabel("100%")
+        label_100.setStyleSheet("font-size: 10px; color: #888;")
+        
+        self.speed_val_label = QtWidgets.QLabel("50%")
+        self.speed_val_label.setStyleSheet("font-weight: bold; color: #1976d2; font-size: 12px;")
+        
+        labels_layout.addWidget(label_0)
+        labels_layout.addStretch()
+        
+        # Manual Input Spinbox
+        self.speed_spin = QtWidgets.QSpinBox()
+        self.speed_spin.setRange(0, 100)
+        self.speed_spin.setValue(self.current_speed)
+        self.speed_spin.setSuffix("%")
+        self.speed_spin.setFixedWidth(60)
+        self.speed_spin.setStyleSheet("""
+            QSpinBox {
+                background: white;
+                color: #1976d2;
+                border: 1px solid #1976d2;
+                border-radius: 3px;
+                padding: 2px;
+                font-weight: bold;
+            }
+        """)
+        labels_layout.addWidget(self.speed_spin)
+        
+        labels_layout.addStretch()
+        labels_layout.addWidget(label_100)
+        speed_layout.addLayout(labels_layout)
+        
+        self.speed_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.speed_slider.setRange(0, 100)
+        self.speed_slider.setValue(self.current_speed)
+        self.speed_slider.setFixedHeight(25)
+        self.speed_slider.setCursor(QtCore.Qt.PointingHandCursor)
+        self.speed_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                height: 12px;
+                background: #e0e0e0;
+                border-radius: 6px;
+            }
+            QSlider::sub-page:horizontal {
+                background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                    stop: 0 #bbdefb, stop: 1 #1976d2);
+                border-radius: 6px;
+            }
+            QSlider::handle:horizontal {
+                background: white;
+                border: 2px solid #1976d2;
+                width: 20px;
+                height: 20px;
+                margin-top: -5px;
+                margin-bottom: -5px;
+                border-radius: 10px;
+            }
+        """)
+        self.speed_slider.valueChanged.connect(self.on_speed_change)
+        self.speed_spin.valueChanged.connect(self.on_speed_change)
+        speed_layout.addWidget(self.speed_slider)
+        
+        left_layout.addWidget(speed_container)
+
         self.main_splitter.addWidget(left_container)
         self.main_splitter.addWidget(self.right_splitter)
         
@@ -374,10 +450,35 @@ class MainWindow(QtWidgets.QMainWindow):
             # Enable controls
             self.save_btn.setEnabled(True)
             self.load_btn.setEnabled(True)
+            
+            # Remove any speed overlay from canvas
+            self.canvas.plotter.remove_actor("speed_overlay")
+            self.canvas.plotter.render()
 
-            # Reset Robot to initial pose if desired? 
-            # Current requirement says "robot same canvas", implying we keep state or just control it.
-            # We'll leave it in the manipulated pose for now as that's often useful.
+    def on_speed_change(self, value):
+        self.current_speed = value
+        # Sync slider and spinbox without infinite loop
+        if self.speed_slider.value() != value:
+            self.speed_slider.blockSignals(True)
+            self.speed_slider.setValue(value)
+            self.speed_slider.blockSignals(False)
+        if self.speed_spin.value() != value:
+            self.speed_spin.blockSignals(True)
+            self.speed_spin.setValue(value)
+            self.speed_spin.blockSignals(False)
+        self.show_speed_overlay()
+
+    def show_speed_overlay(self):
+        """Displays current speed percentage on the 3D canvas temporarily"""
+        text = f"Speed: {self.current_speed}%"
+        self.canvas.plotter.add_text(
+            text, 
+            position='lower_right', 
+            font_size=12, 
+            color='#1976d2', 
+            name="speed_overlay"
+        )
+        self.canvas.plotter.render()
 
     def setup_links_tab(self):
         layout = QtWidgets.QVBoxLayout(self.links_tab)
@@ -633,7 +734,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.log("⚠️ No joints defined! Add some joints first.")
             return
             
-        code = generate_esp32_firmware(self.robot)
+        code = generate_esp32_firmware(self.robot, default_speed=self.current_speed)
         self.code_drawer.set_code(code)
         
         # Expand the splitter to show the code panel (Width 400 suggested)

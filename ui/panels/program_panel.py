@@ -48,9 +48,9 @@ class ProgramPanel(QtWidgets.QWidget):
         layout.addWidget(QtWidgets.QLabel("Program Code:"))
         self.code_edit = QtWidgets.QPlainTextEdit()
         self.code_edit.setPlainText("""# Example Program
-JOINT Shoulder 30 SPEED 10
+JOINT Shoulder 30
 WAIT 0.5
-JOINT Shoulder -30 SPEED 20
+JOINT Shoulder -30
 WAIT 0.5
 """)
         self.code_edit.setFont(QtGui.QFont("Consolas", 10))
@@ -130,13 +130,13 @@ WAIT 0.5
             if not parts: return
             original_line = line
             
-            # 1. Extract SPEED if present
-            speed = 0
+            # 1. Use global universal speed
+            speed = float(self.mw.current_speed)
+            
+            # Remove SPEED from parts if it was explicitly typed (cleaning up legacy lines)
             if "SPEED" in [p.upper() for p in parts]:
                 s_idx = [p.upper() for p in parts].index("SPEED")
-                if s_idx + 1 < len(parts):
-                    speed = float(parts[s_idx + 1])
-                # Remove SPEED and its value from parts for command parsing
+                # Just remove it and skip its value
                 parts = parts[:s_idx]
             
             # 2. Identify Command and Joint Name
@@ -198,6 +198,8 @@ WAIT 0.5
                     joint.current_value = target_val
                     self.mw.robot.update_kinematics()
                     self.mw.canvas.update_transforms(self.mw.robot)
+                    if hasattr(self.mw, 'show_speed_overlay'):
+                        self.mw.show_speed_overlay()
                     if hw_sync:
                         self.mw.serial_mgr.send_command(j_name, joint.current_value, speed)
                     QtWidgets.QApplication.processEvents()
