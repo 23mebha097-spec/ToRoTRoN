@@ -86,9 +86,10 @@ class SimulationPanel(QtWidgets.QWidget):
         btn.setStyleSheet("""
             QPushButton {
                 background-color: #f5f5f5;
+                color: black;
                 font-weight: bold;
                 border: 1px solid #bbb;
-                border-radius: 4px;
+                border-radius: 8px;
                 padding: 5px;
                 text-align: left;
                 padding-left: 15px;
@@ -106,10 +107,10 @@ class SimulationPanel(QtWidgets.QWidget):
         active_style = """
             QPushButton {
                 background-color: #1976d2;
-                color: white;
+                color: black;
                 font-weight: bold;
                 border: 1px solid #0d47a1;
-                border-radius: 4px;
+                border-radius: 8px;
                 padding: 5px;
                 text-align: left;
                 padding-left: 15px;
@@ -118,10 +119,10 @@ class SimulationPanel(QtWidgets.QWidget):
         inactive_style = """
             QPushButton {
                 background-color: #f5f5f5;
-                color: #212121;
+                color: black;
                 font-weight: bold;
                 border: 1px solid #bbb;
-                border-radius: 4px;
+                border-radius: 8px;
                 padding: 5px;
                 text-align: left;
                 padding-left: 15px;
@@ -315,25 +316,11 @@ class SimulationPanel(QtWidgets.QWidget):
             # Update Graphics
             self.main_window.canvas.update_transforms(self.main_window.robot)
 
-            # --- ROTATION DISC OVERLAY (reference-image style rings) ---
-            try:
-                import numpy as _np
-                _pw = joint.parent_link.t_world
-                _wc = (_pw @ _np.append(joint.origin, 1.0))[:3]
-                _wa = _pw[:3, :3] @ joint.axis
-                # Use joint's child link color (lightened for disc visibility)
-                _raw_color = getattr(joint.child_link, 'color', '#00bcd4') or '#00bcd4'
-                self.main_window.canvas.show_rotation_disc(
-                    center=_wc, axis=_wa, radius=0.35,
-                    name='rotation_disc', color=_raw_color
-                )
-            except Exception:
-                pass
 
             # --- GHOST SHADOW TRAIL ---
             # Sample a ghost every GHOST_STEP degrees of movement
             try:
-                GHOST_STEP = 12  # degrees between ghost snapshots
+                GHOST_STEP = 3  # degrees between ghost snapshots
                 _last = self._last_ghost_angle.get(name, None)
                 _cur_angle = float(value)
                 if _last is None or abs(_cur_angle - _last) >= GHOST_STEP:

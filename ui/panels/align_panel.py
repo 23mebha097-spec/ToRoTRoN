@@ -25,7 +25,6 @@ class AlignPanel(QtWidgets.QWidget):
         layout.addWidget(QtWidgets.QLabel("STEP 1: Pick Parent Face"))
         self.parent_btn = QtWidgets.QPushButton("SELECT PARENT FACE")
         self.parent_btn.clicked.connect(self.pick_parent_face)
-        self.parent_btn.setStyleSheet("background-color: #1976d2; color: white; padding: 8px;")
         layout.addWidget(self.parent_btn)
         
         self.parent_label = QtWidgets.QLabel("Parent: None selected")
@@ -37,7 +36,6 @@ class AlignPanel(QtWidgets.QWidget):
         layout.addWidget(QtWidgets.QLabel("STEP 2: Pick Child Face"))
         self.child_btn = QtWidgets.QPushButton("SELECT CHILD FACE")
         self.child_btn.clicked.connect(self.pick_child_face)
-        self.child_btn.setStyleSheet("background-color: #1565c0; color: white; padding: 8px;")
         layout.addWidget(self.child_btn)
         
         self.child_label = QtWidgets.QLabel("Child: None selected")
@@ -56,7 +54,6 @@ class AlignPanel(QtWidgets.QWidget):
         button_layout = QtWidgets.QHBoxLayout()
         self.align_btn = QtWidgets.QPushButton("ALIGN COMPONENTS")
         self.align_btn.clicked.connect(self.apply_alignment)
-        self.align_btn.setStyleSheet("background-color: #ff9800; font-weight: bold; padding: 10px;")
         button_layout.addWidget(self.align_btn)
         layout.addLayout(button_layout)
 
@@ -102,7 +99,6 @@ class AlignPanel(QtWidgets.QWidget):
 
         self.save_btn = QtWidgets.QPushButton("SAVE & LOCK ASSEMBLY")
         self.save_btn.clicked.connect(self.save_alignment)
-        self.save_btn.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold; padding: 12px;")
         layout.addWidget(self.save_btn)
 
         layout.addSpacing(10)
@@ -111,11 +107,9 @@ class AlignPanel(QtWidgets.QWidget):
         history_layout = QtWidgets.QHBoxLayout()
         self.undo_btn = QtWidgets.QPushButton("undo")
         self.undo_btn.clicked.connect(self.undo_action)
-        self.undo_btn.setStyleSheet("background-color: #e3f2fd; color: #1565c0; padding: 8px; font-size: 14px; border-radius: 4px; border: 1px solid #bbb;")
         
         self.redo_btn = QtWidgets.QPushButton("redo")
         self.redo_btn.clicked.connect(self.redo_action)
-        self.redo_btn.setStyleSheet("background-color: #e3f2fd; color: #1565c0; padding: 8px; font-size: 14px; border-radius: 4px; border: 1px solid #bbb;")
         
         history_layout.addWidget(self.undo_btn)
         history_layout.addWidget(self.redo_btn)

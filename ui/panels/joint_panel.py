@@ -199,20 +199,6 @@ class JointPanel(QtWidgets.QWidget):
         
         # Confirm button
         self.confirm_joint_btn = QtWidgets.QPushButton("CONFIRM JOINT")
-        self.confirm_joint_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 15px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #66BB6A;
-            }
-        """)
         self.confirm_joint_btn.clicked.connect(self.confirm_joint)
         rot_layout.addWidget(self.confirm_joint_btn)
         
@@ -226,50 +212,12 @@ class JointPanel(QtWidgets.QWidget):
         
         # Parent Button
         self.parent_btn = QtWidgets.QPushButton("parent object")
-        self.parent_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #ffcdd2;
-                color: #000;
-                border: 2px solid #d32f2f;
-                border-radius: 5px;
-                padding: 15px;
-                font-size: 13px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #ef9a9a;
-            }
-            QPushButton:disabled {
-                background-color: #e0e0e0;
-                color: #9e9e9e;
-                border-color: #bbb;
-            }
-        """)
         self.parent_btn.clicked.connect(self.set_as_parent)
         self.parent_btn.setEnabled(False)
         buttons_layout.addWidget(self.parent_btn)
         
         # Child Button
         self.child_btn = QtWidgets.QPushButton("child object")
-        self.child_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #bbdefb;
-                color: #000;
-                border: 2px solid #1976d2;
-                border-radius: 5px;
-                padding: 15px;
-                font-size: 13px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #90caf9;
-            }
-            QPushButton:disabled {
-                background-color: #e0e0e0;
-                color: #9e9e9e;
-                border-color: #bbb;
-            }
-        """)
         self.child_btn.clicked.connect(self.set_as_child)
         self.child_btn.setEnabled(False)
         buttons_layout.addWidget(self.child_btn)
@@ -283,36 +231,10 @@ class JointPanel(QtWidgets.QWidget):
         undo_redo_layout.setSpacing(10)
         
         self.undo_btn = QtWidgets.QPushButton("Undo")
-        self.undo_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #d32f2f;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 8px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #f44336;
-            }
-        """)
         self.undo_btn.clicked.connect(self.undo_selection)
         undo_redo_layout.addWidget(self.undo_btn)
         
         self.redo_btn = QtWidgets.QPushButton("Redo")
-        self.redo_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #ff9800;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 8px;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #ffb74d;
-            }
-        """)
         self.redo_btn.clicked.connect(self.redo_selection)
         undo_redo_layout.addWidget(self.redo_btn)
         

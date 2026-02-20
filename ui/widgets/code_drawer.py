@@ -74,11 +74,12 @@ class CodeDrawer(QtWidgets.QWidget):
         self.copy_btn.setToolTip("Copy code to clipboard")
         self.copy_btn.setStyleSheet("""
             QPushButton {
-                background-color: #3d3d3d;
-                color: white;
+                background-color: #e0e0e0;
+                color: black;
                 font-weight: bold;
                 padding: 10px;
-                border-radius: 4px;
+                border-radius: 8px;
+                border: 1px solid #bbb;
             }
             QPushButton:hover {
                 background-color: #4d4d4d;
@@ -93,10 +94,10 @@ class CodeDrawer(QtWidgets.QWidget):
         self.upload_btn.setStyleSheet("""
             QPushButton {
                 background-color: #27ae60;
-                color: white;
+                color: black;
                 font-weight: bold;
                 padding: 10px;
-                border-radius: 4px;
+                border-radius: 8px;
             }
             QPushButton:hover {
                 background-color: #2ecc71;

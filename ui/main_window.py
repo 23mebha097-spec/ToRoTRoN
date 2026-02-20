@@ -178,19 +178,20 @@ class MainWindow(QtWidgets.QMainWindow):
             btn.setCursor(QtCore.Qt.PointingHandCursor)
             btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #000000;
-                    color: white;
-                    border: none;
-                    border-radius: 5px;
+                    background-color: #e0e0e0;
+                    color: black;
+                    border: 1px solid #bbb;
+                    border-radius: 8px;
                     font-size: 14px;
                     font-weight: bold;
                     padding: 5px 15px;
                 }
                 QPushButton:hover {
-                    background-color: #333333;
+                    background-color: #1976d2;
+                    border: 1px solid #1976d2;
                 }
                 QPushButton:pressed {
-                    background-color: #1976d2;
+                    background-color: #1565c0;
                 }
             """)
             btn.clicked.connect(lambda checked, idx=len(self.nav_buttons): self.switch_panel(idx))
@@ -237,15 +238,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.gen_code_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f39c12; 
-                color: white; 
+                color: black; 
                 font-weight: bold; 
                 padding: 10px;
                 font-size: 11px;
-                border: none;
+                border: 1px solid #d48400;
+                border-radius: 8px;
                 margin: 5px;
             }
             QPushButton:hover {
-                background-color: #e67e22;
+                background-color: #1976d2;
+                border: 1px solid #1976d2;
             }
         """)
         self.gen_code_btn.clicked.connect(self.on_generate_code)
@@ -408,28 +411,27 @@ class MainWindow(QtWidgets.QMainWindow):
                 btn.setStyleSheet("""
                     QPushButton {
                         background-color: #1976d2;
-                        color: white;
-                        border: none;
-                        border-radius: 5px;
+                        color: black;
+                        border: 1px solid #1976d2;
+                        border-radius: 8px;
                         font-size: 14px;
                         font-weight: bold;
                         padding: 5px 15px;
                     }
-                    QPushButton:hover { background-color: #1976d2; }
                 """)
             else:
-                # Unselected: Black
+                # Unselected: Light
                 btn.setStyleSheet("""
                     QPushButton {
-                        background-color: #000000;
-                        color: white;
-                        border: none;
-                        border-radius: 5px;
+                        background-color: #e0e0e0;
+                        color: black;
+                        border: 1px solid #bbb;
+                        border-radius: 8px;
                         font-size: 14px;
                         font-weight: bold;
                         padding: 5px 15px;
                     }
-                    QPushButton:hover { background-color: #333333; }
+                    QPushButton:hover { background-color: #1976d2; border: 1px solid #1976d2; }
                 """)
 
     def toggle_simulation(self, checked):
@@ -688,13 +690,24 @@ class MainWindow(QtWidgets.QMainWindow):
             QPushButton {
                 background-color: #e0e0e0;
                 border: 1px solid #bbb;
-                padding: 8px;
-                border-radius: 4px;
-                color: #212121;
+                padding: 10px 15px;
+                border-radius: 8px;
+                color: black;
+                font-weight: bold;
             }
             QPushButton:hover {
                 background-color: #1976d2;
-                color: white;
+                color: black;
+                border: 1px solid #1976d2;
+            }
+            QPushButton:pressed {
+                background-color: #1565c0;
+                color: black;
+            }
+            QPushButton:disabled {
+                background-color: #f5f5f5;
+                color: #9e9e9e;
+                border: 1px solid #ddd;
             }
             QListWidget {
                 background-color: white;

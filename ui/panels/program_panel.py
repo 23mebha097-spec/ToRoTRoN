@@ -7,6 +7,15 @@ class ProgramPanel(QtWidgets.QWidget):
         super().__init__()
         self.mw = main_window
         self.is_running = False
+        self.current_lang = "normal" # Default language
+        
+        # Example templates for each language
+        self.templates = {
+            "normal": "# Example Program\nJOINT Shoulder 30\nWAIT 0.5\nJOINT Shoulder -30\nWAIT 0.5\n",
+            "python": "# Python Example\nrobot.move('Shoulder', 30)\nrobot.wait(0.5)\nrobot.move('Shoulder', -30)\nrobot.wait(0.5)\n",
+            "matlab": "% Matlab Example\njoint('Shoulder', 30);\npause(0.5);\njoint('Shoulder', -30);\npause(0.5);\n"
+        }
+        
         self.init_ui()
 
     def init_ui(self):
@@ -18,19 +27,19 @@ class ProgramPanel(QtWidgets.QWidget):
         
         self.upload_btn = QtWidgets.QPushButton("UPLOAD CODE")
         self.upload_btn.setToolTip("Run code on Hardware (ESP32)")
-        self.upload_btn.setStyleSheet("background-color: #1976d2; font-weight: bold; color: white;")
+        self.upload_btn.setStyleSheet("background-color: #1976d2; font-weight: bold; color: black; border-radius: 8px; padding: 5px;")
         self.upload_btn.clicked.connect(self.upload_code)
         self.toolbar_layout.addWidget(self.upload_btn)
         
         self.run_btn = QtWidgets.QPushButton("RUN PROGRAM")
         self.run_btn.setToolTip("Run Simulation Only")
-        self.run_btn.setStyleSheet("background-color: #4caf50; font-weight: bold; color: white;")
+        self.run_btn.setStyleSheet("background-color: #4caf50; font-weight: bold; color: black; border-radius: 8px; padding: 5px;")
         self.run_btn.clicked.connect(self.run_program)
         self.toolbar_layout.addWidget(self.run_btn)
         
         self.stop_btn = QtWidgets.QPushButton("STOP")
         self.stop_btn.setToolTip("Stop execution")
-        self.stop_btn.setStyleSheet("background-color: #d32f2f; font-weight: bold; color: white;")
+        self.stop_btn.setStyleSheet("background-color: #d32f2f; font-weight: bold; color: black; border-radius: 8px; padding: 5px;")
         self.stop_btn.clicked.connect(self.stop_program)
         self.toolbar_layout.addWidget(self.stop_btn)
         
@@ -56,6 +65,58 @@ WAIT 0.5
         self.code_edit.setFont(QtGui.QFont("Consolas", 10))
         # Give editor stretch factor of 1 so it fills the space
         layout.addWidget(self.code_edit, 1)
+
+        # --- LANGUAGE SELECTION BUTTONS (Bottom) ---
+        lang_layout = QtWidgets.QHBoxLayout()
+        lang_layout.setSpacing(10)
+        
+        self.lang_btns = {}
+        for lang in ["normal code", "python", "matlab"]:
+            btn = QtWidgets.QPushButton(lang)
+            btn.setCheckable(True)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #e0e0e0;
+                    color: black;
+                    border: 2px solid #333;
+                    border-radius: 8px;
+                    padding: 10px;
+                    font-weight: bold;
+                    min-width: 100px;
+                }
+                QPushButton:checked {
+                    background-color: #1976d2;
+                    border-color: #1976d2;
+                }
+                QPushButton:hover {
+                    background-color: #1976d2;
+                }
+            """)
+            btn.clicked.connect(lambda checked, l=lang: self.set_language(l))
+            lang_layout.addWidget(btn)
+            self.lang_btns[lang] = btn
+            
+        self.lang_btns["normal code"].setChecked(True)
+        layout.addLayout(lang_layout)
+        layout.addSpacing(10)
+
+    def set_language(self, lang):
+        """Switches the editor template and parsing mode."""
+        self.current_lang = lang.replace(" code", "")
+        
+        # Uncheck others
+        for name, btn in self.lang_btns.items():
+            btn.blockSignals(True)
+            btn.setChecked(name == lang)
+            btn.blockSignals(False)
+            
+        # Set template if editor is empty or just has another template
+        current_text = self.code_edit.toPlainText().strip()
+        is_default = any(current_text == t.strip() for t in self.templates.values())
+        if not current_text or is_default:
+            self.code_edit.setPlainText(self.templates[self.current_lang])
+            
+        self.mw.log(f"Language set to: {lang.upper()}")
 
     def upload_code(self):
         """Hardware Sync execution of the editor's code."""
@@ -100,17 +161,68 @@ WAIT 0.5
         sync_to_hw = self.sync_hw_check.isChecked()
         hw_msg = "(Hardware Live Sync ENABLED)" if sync_to_hw else "(Hardware Signals Disabled)"
         
-        self.mw.log(f"🧪 RUNNING SIMULATION {hw_msg}...")
-        for line in lines:
-            if not self.is_running: break
-            line = line.strip()
-            if not line or line.startswith("#"): continue
-            self.execute_line(line, force_hw_sync=sync_to_hw)
+        self.mw.log(f"🧪 RUNNING {self.current_lang.upper()} SIMULATION {hw_msg}...")
+        
+        if self.current_lang == "python":
+            self.run_python_code(code, sync_to_hw)
+        elif self.current_lang == "matlab":
+            self.run_matlab_code(code, sync_to_hw)
+        else:
+            # Standard "normal code" parsing
+            for line in lines:
+                if not self.is_running: break
+                line = line.strip()
+                if not line or line.startswith("#"): continue
+                self.execute_line(line, force_hw_sync=sync_to_hw)
             
         self.is_running = False
         self.upload_btn.setEnabled(True)
         self.run_btn.setEnabled(True)
-        self.mw.log("Simulation Finished.")
+        self.mw.log(f"{self.current_lang.upper()} Finished.")
+
+    def run_python_code(self, code, sync_to_hw):
+        """Executes Python code with a safe robot API."""
+        class RobotAPI:
+            def __init__(self, panel, sync):
+                self.panel = panel
+                self.sync = sync
+            def move(self, joint_name, angle):
+                if not self.panel.is_running: return
+                self.panel.execute_line(f"JOINT {joint_name} {angle}", force_hw_sync=self.sync)
+            def wait(self, seconds):
+                if not self.panel.is_running: return
+                self.panel.execute_line(f"WAIT {seconds}")
+
+        api = RobotAPI(self, sync_to_hw)
+        try:
+            # Execute with robot api available as 'robot'
+            exec(code, {"robot": api, "print": self.mw.log})
+        except Exception as e:
+            self.mw.log(f"Python Error: {e}")
+
+    def run_matlab_code(self, code, sync_to_hw):
+        """Simulates Matlab syntax execution."""
+        import re
+        lines = code.splitlines()
+        for line in lines:
+            if not self.is_running: break
+            line = line.strip()
+            if not line or line.startswith("%"): continue
+            
+            # Simple regex for joint('name', value)
+            joint_match = re.match(r"joint\s*\(['\"](.+?)['\"]\s*,\s*(-?\d+\.?\d*)\s*\);?", line, re.IGNORECASE)
+            # Simple regex for pause(value)
+            pause_match = re.match(r"pause\s*\((-?\d+\.?\d*)\s*\);?", line, re.IGNORECASE)
+            
+            if joint_match:
+                name = joint_match.group(1)
+                val = joint_match.group(2)
+                self.execute_line(f"JOINT {name} {val}", force_hw_sync=sync_to_hw)
+            elif pause_match:
+                val = pause_match.group(1)
+                self.execute_line(f"WAIT {val}")
+            else:
+                self.mw.log(f"Matlab Parser: Skipping unknown line: {line}")
 
     def stop_program(self):
         """Stops script execution."""
@@ -188,19 +300,6 @@ WAIT 0.5
                                 joint.current_value += step_inc
                                 self.mw.robot.update_kinematics()
                                 self.mw.canvas.update_transforms(self.mw.robot)
-                                # Show rotation disc overlay
-                                try:
-                                    import numpy as _np
-                                    _pw = joint.parent_link.t_world
-                                    _wc = (_pw @ _np.append(joint.origin, 1.0))[:3]
-                                    _wa = _pw[:3, :3] @ joint.axis
-                                    _col = getattr(joint.child_link, 'color', '#00bcd4') or '#00bcd4'
-                                    self.mw.canvas.show_rotation_disc(
-                                        center=_wc, axis=_wa, radius=0.35,
-                                        name='rotation_disc', color=_col
-                                    )
-                                except Exception:
-                                    pass
                                 # Ghost shadow every ~12 deg
                                 try:
                                     _l = joint.child_link
@@ -224,19 +323,6 @@ WAIT 0.5
                     joint.current_value = target_val
                     self.mw.robot.update_kinematics()
                     self.mw.canvas.update_transforms(self.mw.robot)
-                    # Show rotation disc at final position
-                    try:
-                        import numpy as _np
-                        _pw = joint.parent_link.t_world
-                        _wc = (_pw @ _np.append(joint.origin, 1.0))[:3]
-                        _wa = _pw[:3, :3] @ joint.axis
-                        _col = getattr(joint.child_link, 'color', '#00bcd4') or '#00bcd4'
-                        self.mw.canvas.show_rotation_disc(
-                            center=_wc, axis=_wa, radius=0.35,
-                            name='rotation_disc', color=_col
-                        )
-                    except Exception:
-                        pass
                     if hasattr(self.mw, 'show_speed_overlay'):
                         self.mw.show_speed_overlay()
                     if hw_sync:

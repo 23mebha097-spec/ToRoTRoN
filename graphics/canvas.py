@@ -778,12 +778,12 @@ class RobotCanvas(QtWidgets.QWidget):
     # ── JOINT MOTION TRAIL (Ghost Shadows) ──────────────────────────────────
     def _init_ghost_system(self):
         """Initialize ghost trail tracking (called lazily on first use)."""
-        if not hasattr(self, '_ghost_actors'):
-            self._ghost_actors = {}       # name -> actor
-            self._ghost_counter = 0       # monotonic ID for unique actor names
-            self._ghost_timer = QtCore.QTimer(self)
-            self._ghost_timer.setSingleShot(True)
-            self._ghost_timer.timeout.connect(self.clear_joint_ghosts)
+        if not hasattr(self, '_ghost_data'):
+            self._ghost_data = {}  # name -> {'actor': actor, 'time': start_time, 'opacity': initial}
+            self._ghost_counter = 0
+            self._fade_timer = QtCore.QTimer(self)
+            self._fade_timer.timeout.connect(self._process_ghost_fading)
+            self._fade_timer.start(100) # Update every 100ms
 
     def add_joint_ghost(self, mesh, transform, color="#888888", opacity=0.22):
         """
@@ -801,6 +801,7 @@ class RobotCanvas(QtWidgets.QWidget):
         try:
             import pyvista as _pv
             import trimesh as _trimesh
+            import time as _time
 
             # Convert if trimesh
             if isinstance(mesh, _trimesh.Trimesh):
@@ -808,14 +809,14 @@ class RobotCanvas(QtWidgets.QWidget):
             else:
                 poly = mesh
 
-            # Cap ghost count at 10 (remove oldest when full)
-            if len(self._ghost_actors) >= 10:
-                oldest_key = next(iter(self._ghost_actors))
+            # Cap ghost count at 100 for "continuous" feel
+            if len(self._ghost_data) >= 100:
+                oldest_key = next(iter(self._ghost_data))
                 try:
-                    self.plotter.remove_actor(self._ghost_actors[oldest_key])
+                    self.plotter.remove_actor(self._ghost_data[oldest_key]['actor'])
                 except Exception:
                     pass
-                del self._ghost_actors[oldest_key]
+                del self._ghost_data[oldest_key]
 
             # Add to scene
             ghost_name = f"_ghost_{self._ghost_counter}"
@@ -831,82 +832,59 @@ class RobotCanvas(QtWidgets.QWidget):
                 user_matrix=transform,
                 lighting=True,
             )
-            self._ghost_actors[ghost_name] = actor
-
-            # Reset 10-second auto-clear timer
-            self._ghost_timer.start(10000)  # 10 000 ms = 10 s
+            
+            self._ghost_data[ghost_name] = {
+                'actor': actor,
+                'start_time': _time.time(),
+                'init_opacity': opacity
+            }
 
         except Exception:
             pass
+
+    def _process_ghost_fading(self):
+        """Periodically reduces opacity of ghosts and removes them after 10s."""
+        import time as _time
+        now = _time.time()
+        to_remove = []
+        
+        for name, data in self._ghost_data.items():
+            age = now - data['start_time']
+            
+            if age >= 10.0:
+                to_remove.append(name)
+            else:
+                # Fade out: starts fading after 5s, completely gone at 10s
+                # Or just whisper linearly? Let's do a "whisper" effect.
+                # If we want a 10s life, we can just linearly decrease opacity.
+                new_opacity = data['init_opacity'] * (1.0 - (age / 10.0))
+                data['actor'].GetProperty().SetOpacity(max(0, new_opacity))
+        
+        if to_remove:
+            for name in to_remove:
+                try:
+                    self.plotter.remove_actor(self._ghost_data[name]['actor'])
+                except Exception:
+                    pass
+                del self._ghost_data[name]
+                
+        if self._ghost_data or to_remove:
+            try:
+                self.plotter.render()
+            except:
+                pass
 
     def clear_joint_ghosts(self):
         """Removes all ghost shadow actors from the scene."""
-        self._init_ghost_system()
-        for actor_name in list(self._ghost_actors.keys()):
+        if not hasattr(self, '_ghost_data'): return
+        for name in list(self._ghost_data.keys()):
             try:
-                self.plotter.remove_actor(self._ghost_actors[actor_name])
-            except Exception:
+                self.plotter.remove_actor(self._ghost_data[name]['actor'])
+            except:
                 pass
-        self._ghost_actors.clear()
-        self._ghost_timer.stop()
-        try:
-            self.plotter.render()
-        except Exception:
-            pass
-
-    def show_rotation_disc(self, center, axis, radius=0.35, name="rotation_disc", color="#00bcd4"):
-        """Shows a glowing semi-transparent disc at a joint rotation plane during movement."""
-        import numpy as _np
-        import pyvista as _pv
-        for suffix in ["_disc", "_ring"]:
-            try:
-                self.plotter.remove_actor(name + suffix)
-            except Exception:
-                pass
-
-        center = _np.array(center, dtype=float)
-        axis = _np.array(axis, dtype=float)
-        n = _np.linalg.norm(axis)
-        axis = axis / n if n > 1e-6 else _np.array([0.0, 0.0, 1.0])
-
-        z = _np.array([0.0, 0.0, 1.0])
-        T = _np.eye(4)
-        T[:3, 3] = center
-        rot_ax = _np.cross(z, axis)
-        rot_n = _np.linalg.norm(rot_ax)
-        if rot_n > 1e-6:
-            rot_ax /= rot_n
-            ang = _np.degrees(_np.arccos(_np.clip(_np.dot(z, axis), -1.0, 1.0)))
-            c = _np.cos(_np.radians(ang))
-            s = _np.sin(_np.radians(ang))
-            t = 1.0 - c
-            rx, ry, rz = rot_ax
-            T[:3, :3] = _np.array([
-                [t*rx*rx + c,     t*rx*ry - s*rz, t*rx*rz + s*ry],
-                [t*rx*ry + s*rz,  t*ry*ry + c,    t*ry*rz - s*rx],
-                [t*rx*rz - s*ry,  t*ry*rz + s*rx, t*rz*rz + c   ]
-            ])
-
-        disc = _pv.Disc(inner=0.0, outer=radius, c_res=72)
-        self.plotter.add_mesh(disc, color=color, opacity=0.28,
-                              show_edges=False, name=name + "_disc",
-                              pickable=False, user_matrix=T, lighting=False)
-
-        theta = _np.linspace(0, 2 * _np.pi, 128, endpoint=False)
-        pts = _np.column_stack([radius * _np.cos(theta), radius * _np.sin(theta), _np.zeros(128)])
-        pts_closed = _np.vstack([pts, pts[0]])
-        lines = _np.array([[2, i, i + 1] for i in range(len(pts_closed) - 1)]).flatten()
-        ring_poly = _pv.PolyData(pts_closed)
-        ring_poly.lines = lines
-        self.plotter.add_mesh(ring_poly, color="white", line_width=3,
-                              name=name + "_ring", pickable=False,
-                              user_matrix=T, lighting=False)
+        self._ghost_data.clear()
+        self.plotter.render()
 
     def clear_rotation_discs(self):
         """Removes rotation disc overlays from the scene."""
-        for suffix in ["_disc", "_ring"]:
-            try:
-                self.plotter.remove_actor("rotation_disc" + suffix)
-            except Exception:
-                pass
-        self.plotter.render()
+        pass
