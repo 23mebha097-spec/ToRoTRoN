@@ -79,18 +79,23 @@ class RobotCanvas(QtWidgets.QWidget):
         # Keyboard Shortcut: Escape to deselect everything
         self.plotter.add_key_event("Escape", self.deselect_all)
 
+    def _dist_point_to_segment(self, p, a, b):
+        """Calculates distance from point p to line segment (a, b)"""
+        pa = p - a
+        ba = b - a
+        denom = np.dot(ba, ba)
+        if denom < 1e-18: return np.linalg.norm(pa)
+        h = np.clip(np.dot(pa, ba) / denom, 0, 1)
+        return np.linalg.norm(pa - ba * h)
+
     def _on_face_pick_click(self, click_pos):
-        """Enhanced face picking - detects geometric features (holes, planar regions)."""
+        """Enhanced face picking - detects geometric features and picks specific loops."""
         self.cell_picker.Pick(click_pos[0], click_pos[1], 0, self.plotter.renderer)
         cell_id = self.cell_picker.GetCellId()
         actor = self.cell_picker.GetActor()
 
         if cell_id != -1 and actor:
-            link_name = None
-            for name, a in self.actors.items():
-                if a == actor:
-                    link_name = name
-                    break
+            link_name = next((name for name, a in self.actors.items() if a == actor), None)
             
             if link_name:
                 mesh = pv.wrap(actor.GetMapper().GetInput())
@@ -101,23 +106,43 @@ class RobotCanvas(QtWidgets.QWidget):
                 # 2. Grow region of coplanar/co-cylindrical faces
                 feature_cells = self._grow_feature_region(mesh, cell_id, seed_normal)
                 
-                # 3. Extract boundary edges
-                boundary_edges = self._extract_boundary_edges(mesh, feature_cells)
+                # 3. Find ALL loops on this feature (e.g. outer boundary and holes)
+                loops = self._extract_boundary_edges(mesh, feature_cells)
                 
-                # 4. Calculate feature center and normal
-                center, normal = self._calc_feature_center_normal(mesh, feature_cells, seed_normal)
+                if not loops:
+                    return False
                 
-                # 5. Transform to world coordinates
+                # 4. Find the loop closest to the user's click
                 mat = actor.user_matrix
-                rot = mat[:3, :3]
-                world_normal = rot @ normal
-                world_center = (mat @ np.append(center, 1))[:3]
+                inv_mat = np.linalg.inv(mat)
+                world_pick_pt = self.cell_picker.GetPickPosition()
+                local_pick_pt = (inv_mat @ np.append(world_pick_pt, 1))[:3]
                 
-                if self.on_face_picked_callback:
-                    self.on_face_picked_callback(link_name, world_center, world_normal)
+                best_loop = None
+                min_dist = float('inf')
                 
-                # 6. Visual Highlight - show boundary curve
-                self._highlight_feature_boundary(mesh, boundary_edges, link_name, mat)
+                for loop in loops:
+                    for edge in loop:
+                        p1 = np.array(mesh.GetPoint(edge[0]))
+                        p2 = np.array(mesh.GetPoint(edge[1]))
+                        d = self._dist_point_to_segment(local_pick_pt, p1, p2)
+                        if d < min_dist:
+                            min_dist = d
+                            best_loop = loop
+                
+                if best_loop:
+                    # 5. Calculate center and normal for JUST this loop
+                    center, normal = self._calc_loop_center_normal(mesh, best_loop, seed_normal)
+                    
+                    rot = mat[:3, :3]
+                    world_normal = rot @ normal
+                    world_center = (mat @ np.append(center, 1))[:3]
+                    
+                    if self.on_face_picked_callback:
+                        self.on_face_picked_callback(link_name, world_center, world_normal)
+                    
+                    # 6. Visual Highlight - show ONLY the selected boundary loop
+                    self._highlight_feature_boundary(mesh, best_loop, link_name, mat)
                 
                 self.picking_face = False
                 self.plotter.render()
@@ -184,40 +209,30 @@ class RobotCanvas(QtWidgets.QWidget):
         return feature if feature else [seed_id]
 
     def _extract_boundary_edges(self, mesh, cell_ids):
-        """Extract boundary edges and sort them into continuous loops"""
+        """Extract boundary edges and return them as a list of independent continuous loops"""
         edge_count = {}
-        edge_to_cells = {}
-        
         for cid in cell_ids:
             cell = mesh.GetCell(cid)
             n_pts = cell.GetNumberOfPoints()
-            
             for i in range(n_pts):
                 p1 = cell.GetPointId(i)
                 p2 = cell.GetPointId((i + 1) % n_pts)
                 edge = tuple(sorted([p1, p2]))
                 edge_count[edge] = edge_count.get(edge, 0) + 1
-                
-                if edge not in edge_to_cells:
-                    edge_to_cells[edge] = []
-                edge_to_cells[edge].append(cid)
         
-        # Boundary edges appear only once
+        # Boundary edges appear only once in the set of faces
         boundary = [e for e, count in edge_count.items() if count == 1]
         
-        # Sort edges into connected loops
-        if len(boundary) > 2:
-            loops = self._sort_edges_into_loops(boundary)
-            return loops
-        
-        return boundary
+        if not boundary:
+            return []
+            
+        return self._sort_edges_into_loops(boundary)
 
     def _sort_edges_into_loops(self, edges):
-        """Sort disconnected edges into continuous boundary loops"""
+        """Sort disconnected edges into separate continuous boundary loops"""
         if not edges:
             return []
             
-        # Build adjacency map
         point_to_edges = {}
         for edge in edges:
             for pt in edge:
@@ -225,19 +240,18 @@ class RobotCanvas(QtWidgets.QWidget):
                     point_to_edges[pt] = []
                 point_to_edges[pt].append(edge)
         
-        sorted_edges = []
+        all_loops = []
         remaining = set(edges)
         
         while remaining:
-            # Start a new loop
+            loop = []
             current_edge = remaining.pop()
-            sorted_edges.append(current_edge)
+            loop.append(current_edge)
             
-            # Try to connect edges
+            # Trace from the current end point
             current_end = current_edge[1]
             
             while True:
-                # Find edge that starts with current_end
                 next_edge = None
                 for candidate in point_to_edges.get(current_end, []):
                     if candidate in remaining:
@@ -247,24 +261,24 @@ class RobotCanvas(QtWidgets.QWidget):
                 if next_edge is None:
                     break
                     
-                # Orient edge correctly
-                if next_edge[0] != current_end:
-                    next_edge = (next_edge[1], next_edge[0])
-                
-                sorted_edges.append(next_edge)
+                # Orient edge correctly to maintain flow
+                if next_edge[0] == current_end:
+                    loop.append(next_edge)
+                    current_end = next_edge[1]
+                else:
+                    loop.append((next_edge[1], next_edge[0]))
+                    current_end = next_edge[0]
+                    
                 remaining.discard(next_edge)
-                current_end = next_edge[1]
-        
-        return sorted_edges
+            all_loops.append(loop)
+            
+        return all_loops
 
-    def _calc_feature_center_normal(self, mesh, cell_ids, seed_normal):
-        """Calculate centroid and average normal of feature"""
+    def _calc_loop_center_normal(self, mesh, loop, seed_normal):
+        """Calculate centroid of a boundary loop and return with seed normal"""
         all_pts = []
-        for cid in cell_ids:
-            cell = mesh.GetCell(cid)
-            points = cell.GetPoints()
-            for i in range(points.GetNumberOfPoints()):
-                all_pts.append(np.array(points.GetPoint(i)))
+        for edge in loop:
+            all_pts.append(np.array(mesh.GetPoint(edge[0])))
         
         if all_pts:
             center = np.mean(all_pts, axis=0)
