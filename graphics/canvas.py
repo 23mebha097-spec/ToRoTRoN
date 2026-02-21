@@ -826,7 +826,9 @@ class RobotCanvas(QtWidgets.QWidget):
                 poly,
                 color=color,
                 opacity=opacity,
-                show_edges=False,
+                show_edges=True,
+                edge_color="black",
+                line_width=1,
                 name=ghost_name,
                 pickable=False,
                 user_matrix=transform,
@@ -863,7 +865,7 @@ class RobotCanvas(QtWidgets.QWidget):
                 continue
                 
             age = now - data['start_time']
-            if age >= 101.0:
+            if age >= 10.0:
                 to_remove.append(name)
             # Static opacity, no fade calculation as per request
         
