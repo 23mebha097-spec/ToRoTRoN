@@ -148,6 +148,7 @@ WAIT 0.5
         self.is_running = False
         self.upload_btn.setEnabled(True)
         self.run_btn.setEnabled(True)
+        self.update_hw_badge()
         self.mw.log("Hardware Upload Finished.")
 
     def run_program(self):
@@ -240,12 +241,7 @@ WAIT 0.5
         hw_sync = False
         if force_hw_sync:
             hw_sync = self.mw.serial_mgr.is_connected if hasattr(self.mw, 'serial_mgr') else False
-            if not hw_sync:
-                self.hw_status_lbl.setText("● HW Offline")
-                self.hw_status_lbl.setStyleSheet("color: #f44336;")
-            else:
-                self.hw_status_lbl.setText("● HW Streaming")
-                self.hw_status_lbl.setStyleSheet("color: #4caf50;")
+            self.update_hw_badge()
         else:
             self.hw_status_lbl.setText("● HW Idle")
             self.hw_status_lbl.setStyleSheet("color: #888;")
@@ -360,5 +356,19 @@ WAIT 0.5
                 self.mw.log(f"CMD: {original_line} (IK implementation pending)")
                 
         except Exception as e:
-            self.mw.log(f"Error executing '{line}': {e}")
+            self.mw.log(f"Error executing line: {line} -> {str(e)}")
 
+    def update_hw_badge(self):
+        """Syncs the badge color with the physical SerialManager state."""
+        if not hasattr(self.mw, 'serial_mgr'): return
+        
+        if self.mw.serial_mgr.is_connected:
+            if self.is_running and self.sync_hw_check.isChecked():
+                self.hw_status_lbl.setText("● HW Streaming")
+                self.hw_status_lbl.setStyleSheet("color: #4caf50;")
+            else:
+                self.hw_status_lbl.setText("● HW Online")
+                self.hw_status_lbl.setStyleSheet("color: #2196f3;") # Blue for standby online
+        else:
+            self.hw_status_lbl.setText("● HW Offline")
+            self.hw_status_lbl.setStyleSheet("color: #f44336;")

@@ -12,17 +12,21 @@ class SerialManager:
         self.port_name = None
         
     def get_available_ports(self):
-        """Returns a list of available COM port names."""
+        """Returns a list of detailed COM port strings: 'COMx (Device Description)'"""
         ports = serial.tools.list_ports.comports()
-        return [port.device for port in ports]
+        # Filter out common non-relevant ports or just show all with descriptions
+        return [f"{p.device} ({p.description})" for p in ports]
         
     def connect(self, port_name, baudrate=115200):
-        """Opens the serial connection."""
+        """Opens the serial connection. Supports 'COMx' or 'COMx (Desc)' formats."""
         try:
+            # Strip description if present: "COM6 (USB-Serial)" -> "COM6"
+            raw_port = port_name.split(" ")[0]
+            
             if self.is_connected:
                 self.disconnect()
                 
-            self.serial_port = serial.Serial(port_name, baudrate, timeout=0.1)
+            self.serial_port = serial.Serial(raw_port, baudrate, timeout=0.1)
             
             # --- ESP32 STABILITY FIX ---
             # Explicitly release DTR/RTS to prevent the board from staying in 'Boot/Download' mode
