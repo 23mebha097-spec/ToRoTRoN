@@ -785,7 +785,7 @@ class RobotCanvas(QtWidgets.QWidget):
             self._fade_timer.timeout.connect(self._process_ghost_fading)
             self._fade_timer.start(500) # Update every 500ms
 
-    def add_joint_ghost(self, mesh, transform, color="white", opacity=0.06):
+    def add_joint_ghost(self, mesh, transform, color="#888888", opacity=0.1):
         """
         Adds one semi-transparent ghost snapshot of a link at its current
         transform. Resets the 10-second auto-clear timer on every call.
@@ -809,8 +809,8 @@ class RobotCanvas(QtWidgets.QWidget):
             else:
                 poly = mesh
 
-            # Cap ghost count at 2000 for extremely long persistent trails
-            if len(self._ghost_data) >= 2000:
+            # Cap ghost count at 5000 for maximum persistence
+            if len(self._ghost_data) >= 5000:
                 oldest_key = next(iter(self._ghost_data))
                 try:
                     self.plotter.remove_actor(self._ghost_data[oldest_key]['actor'])
@@ -830,7 +830,7 @@ class RobotCanvas(QtWidgets.QWidget):
                 name=ghost_name,
                 pickable=False,
                 user_matrix=transform,
-                lighting=True,
+                lighting=False, # Flat color for "clearer" light look
             )
             
             self._ghost_data[ghost_name] = {
