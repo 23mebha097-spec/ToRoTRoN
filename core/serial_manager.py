@@ -10,6 +10,8 @@ class SerialManager:
         self.is_connected = False
         self.baudrate = 115200
         self.port_name = None
+        self.last_heartbeat_rx = 0
+        self.stop_heartbeat = False
         
     def get_available_ports(self):
         """Returns a list of detailed COM port strings: 'COMx (Device Description)'"""
@@ -43,6 +45,11 @@ class SerialManager:
             self.listener_thread = threading.Thread(target=self._listen_loop, daemon=True)
             self.listener_thread.start()
             
+            # Start Heartbeat thread
+            self.stop_heartbeat = False
+            self.heartbeat_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
+            self.heartbeat_thread.start()
+            
             return True
         except Exception as e:
             self.mw.log(f"Failed to connect to {port_name}: {e}")
@@ -52,6 +59,7 @@ class SerialManager:
     def disconnect(self):
         """Closes the serial connection."""
         self.stop_listener = True
+        self.stop_heartbeat = True
         if self.serial_port and self.serial_port.is_open:
             self.serial_port.close()
         self.is_connected = False
@@ -64,8 +72,12 @@ class SerialManager:
                 if self.serial_port and self.serial_port.in_waiting > 0:
                     line = self.serial_port.readline().decode('utf-8', errors='ignore').strip()
                     if line:
+                        if "PONG" in line or "ACK" in line or "READY" in line:
+                            self.last_heartbeat_rx = time.time()
+                            # Don't log heartbeats to avoid spam, but keep them for sync
+                            if "PONG" in line: continue
+                            
                         # Print ESP32 messages to the main console
-                        # Use a prefix to distinguish hardware messages
                         self.mw.log_signal.emit(f"[ESP32]: {line}")
             except Exception:
                 break
@@ -85,3 +97,19 @@ class SerialManager:
         except Exception as e:
             self.mw.log(f"Serial Send Error: {e}")
             self.disconnect()
+
+    def _heartbeat_loop(self):
+        """Sends a 'PING' command every 2 seconds to check if ESP32 is alive."""
+        while not self.stop_heartbeat and self.is_connected:
+            try:
+                if self.serial_port and self.serial_port.is_open:
+                    self.serial_port.write(b"?\n") # '?' is our heartbeat request
+            except:
+                pass
+            time.sleep(2.0)
+
+    @property
+    def is_alive(self):
+        """Returns True if we've heard from the ESP32 in the last 5 seconds."""
+        if not self.is_connected: return False
+        return (time.time() - self.last_heartbeat_rx) < 5.0

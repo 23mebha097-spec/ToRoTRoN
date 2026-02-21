@@ -70,6 +70,7 @@ def generate_esp32_firmware(robot, default_speed=50):
     code.append("  if (Serial.available() > 0) {")
     code.append("    String cmd = Serial.readStringUntil('\\n');")
     code.append("    cmd.trim();")
+    code.append("    if (cmd == \"?\") { Serial.println(\"PONG\"); return; }")
     code.append("    if (cmd.length() > 0) parseCommand(cmd);")
     code.append("  }")
     code.append("}\n")

@@ -17,6 +17,11 @@ class ProgramPanel(QtWidgets.QWidget):
         }
         
         self.init_ui()
+        
+        # Periodic UI updates for hardware health
+        self.badge_timer = QtCore.QTimer(self)
+        self.badge_timer.timeout.connect(self.update_hw_badge)
+        self.badge_timer.start(1000) # Check every 1s
 
     def init_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
@@ -359,11 +364,15 @@ WAIT 0.5
             self.mw.log(f"Error executing line: {line} -> {str(e)}")
 
     def update_hw_badge(self):
-        """Syncs the badge color with the physical SerialManager state."""
+        """Syncs the badge color with the physical SerialManager state and liveness."""
         if not hasattr(self.mw, 'serial_mgr'): return
         
-        if self.mw.serial_mgr.is_connected:
-            if self.is_running and self.sync_hw_check.isChecked():
+        sm = self.mw.serial_mgr
+        if sm.is_connected:
+            if not sm.is_alive:
+                self.hw_status_lbl.setText("● HW Stalled")
+                self.hw_status_lbl.setStyleSheet("color: #ff9800;") # Orange for unresponsive
+            elif self.is_running and self.sync_hw_check.isChecked():
                 self.hw_status_lbl.setText("● HW Streaming")
                 self.hw_status_lbl.setStyleSheet("color: #4caf50;")
             else:
