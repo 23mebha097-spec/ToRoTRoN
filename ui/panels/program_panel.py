@@ -307,9 +307,7 @@ WAIT 0.5
                                     import copy
                                     self.mw.canvas.add_joint_ghost(
                                         mesh=_l.mesh,
-                                        transform=_np2.copy(_l.t_world),
-                                        color=getattr(_l, 'color', '#888888') or '#888888',
-                                        opacity=0.20
+                                        transform=_np2.copy(_l.t_world)
                                     )
                                 except Exception:
                                     pass

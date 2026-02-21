@@ -779,13 +779,13 @@ class RobotCanvas(QtWidgets.QWidget):
     def _init_ghost_system(self):
         """Initialize ghost trail tracking (called lazily on first use)."""
         if not hasattr(self, '_ghost_data'):
-            self._ghost_data = {}  # name -> {'actor': actor, 'time': start_time, 'opacity': initial}
+            self._ghost_data = {}  # name -> {'actor': actor, 'time': start_time}
             self._ghost_counter = 0
             self._fade_timer = QtCore.QTimer(self)
             self._fade_timer.timeout.connect(self._process_ghost_fading)
-            self._fade_timer.start(100) # Update every 100ms
+            self._fade_timer.start(500) # Update every 500ms
 
-    def add_joint_ghost(self, mesh, transform, color="#888888", opacity=0.22):
+    def add_joint_ghost(self, mesh, transform, color="white", opacity=0.06):
         """
         Adds one semi-transparent ghost snapshot of a link at its current
         transform. Resets the 10-second auto-clear timer on every call.
@@ -809,8 +809,8 @@ class RobotCanvas(QtWidgets.QWidget):
             else:
                 poly = mesh
 
-            # Cap ghost count at 100 for "continuous" feel
-            if len(self._ghost_data) >= 100:
+            # Cap ghost count at 2000 for extremely long persistent trails
+            if len(self._ghost_data) >= 2000:
                 oldest_key = next(iter(self._ghost_data))
                 try:
                     self.plotter.remove_actor(self._ghost_data[oldest_key]['actor'])
@@ -843,22 +843,29 @@ class RobotCanvas(QtWidgets.QWidget):
             pass
 
     def _process_ghost_fading(self):
-        """Periodically reduces opacity of ghosts and removes them after 10s."""
+        """Removes ghosts only after 101s. Shadows do not vanish during simulation."""
         import time as _time
         now = _time.time()
-        to_remove = []
         
+        # Check if any simulation is currently running
+        is_running = False
+        try:
+            if hasattr(self.window(), 'program_tab'):
+                is_running = self.window().program_tab.is_running
+        except:
+            pass
+
+        to_remove = []
         for name, data in self._ghost_data.items():
+            if is_running:
+                # Refresh start_time while active so they never expire mid-sim
+                data['start_time'] = now 
+                continue
+                
             age = now - data['start_time']
-            
-            if age >= 10.0:
+            if age >= 101.0:
                 to_remove.append(name)
-            else:
-                # Fade out: starts fading after 5s, completely gone at 10s
-                # Or just whisper linearly? Let's do a "whisper" effect.
-                # If we want a 10s life, we can just linearly decrease opacity.
-                new_opacity = data['init_opacity'] * (1.0 - (age / 10.0))
-                data['actor'].GetProperty().SetOpacity(max(0, new_opacity))
+            # Static opacity, no fade calculation as per request
         
         if to_remove:
             for name in to_remove:
