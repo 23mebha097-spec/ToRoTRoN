@@ -11,9 +11,9 @@ class ProgramPanel(QtWidgets.QWidget):
         
         # Example templates for each language
         self.templates = {
-            "normal": "# Example Program\nJOINT Shoulder 30\nWAIT 0.5\nJOINT Shoulder -30\nWAIT 0.5\n",
-            "python": "# Python Example\nrobot.move('Shoulder', 30)\nrobot.wait(0.5)\nrobot.move('Shoulder', -30)\nrobot.wait(0.5)\n",
-            "matlab": "% Matlab Example\njoint('Shoulder', 30);\npause(0.5);\njoint('Shoulder', -30);\npause(0.5);\n"
+            "normal": "# Normal Code (JOINT Name Angle)\nJOINT Shoulder 45\nWAIT 1.0\nJOINT Shoulder -45\nWAIT 1.0\n",
+            "python": "# Python API (robot.move / robot.wait)\nrobot.move('Shoulder', 45)\nrobot.wait(1.0)\nrobot.move('Shoulder', -45)\nrobot.wait(1.0)\n",
+            "matlab": "% Matlab Syntax (joint / pause)\njoint('Shoulder', 45);\npause(1.0);\njoint('Shoulder', -45);\npause(1.0);\n"
         }
         
         self.init_ui()
@@ -50,6 +50,10 @@ class ProgramPanel(QtWidgets.QWidget):
         self.sync_hw_check.setToolTip("If checked, RUN PROGRAM will also move the physical ESP32 motors.")
         self.sync_hw_check.setStyleSheet("color: #1976d2; font-weight: bold;")
         self.toolbar_layout.addWidget(self.sync_hw_check)
+
+        self.hw_status_lbl = QtWidgets.QLabel("● HW Idle")
+        self.hw_status_lbl.setStyleSheet("color: #888; margin-left: 10px; font-weight: bold;")
+        self.toolbar_layout.addWidget(self.hw_status_lbl)
         
         layout.addLayout(self.toolbar_layout)
         
@@ -236,6 +240,15 @@ WAIT 0.5
         hw_sync = False
         if force_hw_sync:
             hw_sync = self.mw.serial_mgr.is_connected if hasattr(self.mw, 'serial_mgr') else False
+            if not hw_sync:
+                self.hw_status_lbl.setText("● HW Offline")
+                self.hw_status_lbl.setStyleSheet("color: #f44336;")
+            else:
+                self.hw_status_lbl.setText("● HW Streaming")
+                self.hw_status_lbl.setStyleSheet("color: #4caf50;")
+        else:
+            self.hw_status_lbl.setText("● HW Idle")
+            self.hw_status_lbl.setStyleSheet("color: #888;")
         
         try:
             parts = line.split()
