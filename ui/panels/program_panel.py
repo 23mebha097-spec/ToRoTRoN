@@ -306,6 +306,7 @@ WAIT 0.5
                                     import numpy as _np2
                                     import copy
                                     self.mw.canvas.add_joint_ghost(
+                                        _l.name,
                                         mesh=_l.mesh,
                                         transform=_np2.copy(_l.t_world),
                                         color=getattr(_l, 'color', '#888888') or '#888888'

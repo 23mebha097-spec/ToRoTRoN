@@ -331,6 +331,7 @@ class SimulationPanel(QtWidgets.QWidget):
                     _transform = _np2.copy(_link.t_world)
                     _col = getattr(_link, 'color', '#888888') or '#888888'
                     self.main_window.canvas.add_joint_ghost(
+                        _link.name,
                         mesh=_mesh, transform=_transform,
                         color=_col
                     )

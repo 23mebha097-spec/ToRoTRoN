@@ -779,13 +779,13 @@ class RobotCanvas(QtWidgets.QWidget):
     def _init_ghost_system(self):
         """Initialize ghost trail tracking (called lazily on first use)."""
         if not hasattr(self, '_ghost_data'):
-            self._ghost_data = {}  # name -> {'actor': actor, 'time': start_time}
+            self._ghost_data = {}  # name -> {'actor': actor, 'time': start_time, 'link': link_name}
             self._ghost_counter = 0
             self._fade_timer = QtCore.QTimer(self)
             self._fade_timer.timeout.connect(self._process_ghost_fading)
             self._fade_timer.start(500) # Update every 500ms
 
-    def add_joint_ghost(self, mesh, transform, color="#888888", opacity=0.1):
+    def add_joint_ghost(self, link_name, mesh, transform, color="#888888", opacity=0.1):
         """
         Adds one semi-transparent ghost snapshot of a link at its current
         transform. Resets the 10-second auto-clear timer on every call.
@@ -832,38 +832,26 @@ class RobotCanvas(QtWidgets.QWidget):
                 name=ghost_name,
                 pickable=False,
                 user_matrix=transform,
-                lighting=False, # Flat color for "clearer" light look
+                lighting=False,
             )
             
+            # REFRESH RULE: When moving this link, refresh all its existing shadows
+            # so the trail only starts its 10s countdown after the LAST move.
+            now = _time.time()
+            for g_name, g_data in self._ghost_data.items():
+                if g_data.get('link') == link_name:
+                    g_data['start_time'] = now
+
             self._ghost_data[ghost_name] = {
                 'actor': actor,
-                'start_time': _time.time(),
-                'init_opacity': opacity
+                'start_time': now,
+                'link': link_name
             }
 
         except Exception:
             pass
 
-    def _process_ghost_fading(self):
-        """Removes ghosts only after 101s. Shadows do not vanish during simulation."""
-        import time as _time
-        now = _time.time()
-        
-        # Check if any simulation is currently running
-        is_running = False
-        try:
-            if hasattr(self.window(), 'program_tab'):
-                is_running = self.window().program_tab.is_running
-        except:
-            pass
-
-        to_remove = []
         for name, data in self._ghost_data.items():
-            if is_running:
-                # Refresh start_time while active so they never expire mid-sim
-                data['start_time'] = now 
-                continue
-                
             age = now - data['start_time']
             if age >= 10.0:
                 to_remove.append(name)
