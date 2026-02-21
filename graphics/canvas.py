@@ -836,7 +836,7 @@ class RobotCanvas(QtWidgets.QWidget):
             )
             
             # REFRESH RULE: When moving this link, refresh all its existing shadows
-            # so the trail only starts its 10s countdown after the LAST move.
+            # so the trail only starts its countdown after the LAST move.
             now = _time.time()
             for g_name, g_data in self._ghost_data.items():
                 if g_data.get('link') == link_name:
@@ -845,17 +845,44 @@ class RobotCanvas(QtWidgets.QWidget):
             self._ghost_data[ghost_name] = {
                 'actor': actor,
                 'start_time': now,
-                'link': link_name
+                'link': link_name,
+                'init_opacity': opacity
             }
 
         except Exception:
             pass
 
+    def _process_ghost_fading(self):
+        """Shadows stay while simulation is running, then whisper (fade) over 10s."""
+        import time as _time
+        now = _time.time()
+        
+        # Check if simulation is running to prevent any expiration
+        is_running = False
+        try:
+            if hasattr(self.window(), 'program_tab'):
+                is_running = self.window().program_tab.is_running
+        except:
+            pass
+
+        to_remove = []
         for name, data in self._ghost_data.items():
+            if is_running:
+                # Refresh constantly so simulation period doesn't count towards 10s
+                data['start_time'] = now
+                continue
+
             age = now - data['start_time']
-            if age >= 10.0:
+            if age >= 13.0: # Total 13s post-sim (10s solid + 3s whisper)
                 to_remove.append(name)
-            # Static opacity, no fade calculation as per request
+            elif age >= 10.0:
+                # Whisper effect: starts after 10s, fades over 3s
+                fade = 1.0 - ((age - 10.0) / 3.0)
+                new_opacity = data.get('init_opacity', 0.1) * max(0, fade)
+                data['actor'].GetProperty().SetOpacity(new_opacity)
+            else:
+                # Stay fully visible for the first 10s after sim
+                data['actor'].GetProperty().SetOpacity(data.get('init_opacity', 0.1))
         
         if to_remove:
             for name in to_remove:
