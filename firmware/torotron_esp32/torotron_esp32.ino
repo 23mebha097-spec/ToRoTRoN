@@ -30,8 +30,8 @@ void setup() {
   ESP32PWM::allocateTimer(2);
   ESP32PWM::allocateTimer(3);
 
-  // Initialize joint_02_03j1
-  joints[0].name = "joint_02_03j1";
+  // Initialize j1
+  joints[0].name = "j1";
   joints[0].current = 90.0;
   joints[0].target = 90.0;
   joints[0].speed = 0.0;
@@ -53,6 +53,7 @@ void updateSerial() {
   if (Serial.available() > 0) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
+    if (cmd == "?") { Serial.println("PONG"); return; }
     if (cmd.length() > 0) parseCommand(cmd);
   }
 }

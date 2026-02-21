@@ -184,22 +184,25 @@ class CodeDrawer(QtWidgets.QWidget):
         if was_connected:
             self.upload_status_signal.emit("Releasing Serial Port...", False)
             self.mw.serial_mgr.disconnect()
-            time.sleep(1)
+            # Increase wait to 3s to ensure Windows releases the handle
+            time.sleep(3) 
 
         try:
             # 3. Compile & Upload
             self.upload_status_signal.emit("Compiling & Uploading (May take 30s)...", False)
             
-            # Note: We assume esp32 is installed. Core: esp32:esp32:esp32da
-            # Common FQBN for ESP32 Dev Module is esp32:esp32:esp32
+            # Use shell=True for windows to handle potential path issues
             cmd = [
-                arduino_cli, "compile", "--upload",
+                f'"{arduino_cli}"', "compile", "--upload",
                 "-p", port,
                 "--fqbn", "esp32:esp32:esp32",
-                sketch_dir
+                f'"{sketch_dir}"'
             ]
             
-            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True)
+            full_cmd = " ".join(cmd)
+            self.mw.log(f"Executing: {full_cmd}")
+            
+            process = subprocess.Popen(full_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, shell=True)
             stdout, stderr = process.communicate()
 
             if process.returncode == 0:
@@ -214,7 +217,8 @@ class CodeDrawer(QtWidgets.QWidget):
         finally:
             # 4. Reconnect Serial Port
             if was_connected:
-                time.sleep(2) # Wait for ESP32 to reboot
+                # Wait for ESP32 to finish rebooting (increase to 4s)
+                time.sleep(4) 
                 self.upload_status_signal.emit("Reconnecting serial...", False)
                 self.mw.serial_mgr.connect(port)
             
