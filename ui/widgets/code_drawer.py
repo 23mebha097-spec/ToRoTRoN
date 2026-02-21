@@ -191,10 +191,14 @@ class CodeDrawer(QtWidgets.QWidget):
             # 3. Compile & Upload
             self.upload_status_signal.emit("Compiling & Uploading (May take 30s)...", False)
             
+            # Extract raw port (e.g., "COM6" from "COM6 (USB-Serial...)")
+            raw_port = port.split(" ")[0]
+            
             # Use shell=True for windows to handle potential path issues
+            # Ensure the port is quoted in case of any weirdness
             cmd = [
                 f'"{arduino_cli}"', "compile", "--upload",
-                "-p", port,
+                "-p", f'"{raw_port}"',
                 "--fqbn", "esp32:esp32:esp32",
                 f'"{sketch_dir}"'
             ]

@@ -41,6 +41,24 @@ void setup() {
   joints[0].servo.write(90);
 
   Serial.println("\n--- ToRoTRoN HARDWARE ONLINE ---");
+  performHandshake();
+}
+
+void performHandshake() {
+  Serial.println("HANDSHAKE: Moving all pins 0-30-0...");
+  // Move all to 120 (mid + 30)
+  for (int i = 0; i < NUM_JOINTS; i++) {
+    if (joints[i].pin != -1) joints[i].target = 120.0;
+    joints[i].speed = 50.0;
+  }
+  
+  // Wait and move back to 90 (mid)
+  for(int k=0; k<100; k++) { updateServos(); delay(15); }
+  for (int i = 0; i < NUM_JOINTS; i++) {
+    if (joints[i].pin != -1) joints[i].target = 90.0;
+  }
+  for(int k=0; k<100; k++) { updateServos(); delay(15); }
+  Serial.println("HANDSHAKE: Ready.");
 }
 
 void loop() {
