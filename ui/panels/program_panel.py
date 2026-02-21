@@ -11,9 +11,9 @@ class ProgramPanel(QtWidgets.QWidget):
         
         # Example templates for each language
         self.templates = {
-            "normal": "# Normal Code (JOINT Name Angle)\nJOINT Shoulder 45\nWAIT 1.0\nJOINT Shoulder -45\nWAIT 1.0\n",
-            "python": "# Python API (robot.move / robot.wait)\nrobot.move('Shoulder', 45)\nrobot.wait(1.0)\nrobot.move('Shoulder', -45)\nrobot.wait(1.0)\n",
-            "matlab": "% Matlab Syntax (joint / pause)\njoint('Shoulder', 45);\npause(1.0);\njoint('Shoulder', -45);\npause(1.0);\n"
+            "normal": "# Command format: JOINT Name Angle\nJOINT Shoulder 45\nWAIT 1.0\nJOINT Shoulder -45\nWAIT 1.0\n",
+            "python": "# Python API: robot.move('Name', Angle)\nrobot.move('Shoulder', 45)\nrobot.wait(1.0)\nrobot.move('Shoulder', -45)\nrobot.wait(1.0)\n",
+            "matlab": "% Matlab Syntax: joint('Name', Angle)\njoint('Shoulder', 45);\npause(1.0);\njoint('Shoulder', -45);\npause(1.0);\n"
         }
         
         self.init_ui()
@@ -302,8 +302,13 @@ WAIT 0.5
                     start_val = joint.current_value
                     target_val = val
                     
+                    if hw_sync:
+                        # Send the target command ONCE to hardware
+                        # The firmware handles its own internal smoothing
+                        self.mw.serial_mgr.send_command(j_name, target_val, speed)
+
                     if speed > 0:
-                        # Interpolate rotation
+                        # Interpolate rotation FOR SIMULATION ONLY
                         diff = target_val - start_val
                         steps = int(abs(diff) / (speed * 0.1))
                         if steps > 0:
@@ -326,8 +331,8 @@ WAIT 0.5
                                     )
                                 except Exception:
                                     pass
-                                if hw_sync:
-                                    self.mw.serial_mgr.send_command(j_name, joint.current_value, speed)
+                                
+                                # Process UI events to keep view responsive
                                 QtWidgets.QApplication.processEvents()
                                 time.sleep(0.1)
                     

@@ -346,7 +346,7 @@ class SimulationPanel(QtWidgets.QWidget):
             
             # Send command to hardware with current speed
             if hasattr(self.main_window, 'serial_mgr') and self.main_window.serial_mgr.is_connected:
-                joint_id = joint.joint_id
+                joint_id = name
                 self.main_window.serial_mgr.send_command(joint_id, float(value), speed=float(self.main_window.current_speed))
             
             # Update Matrices if visible
