@@ -259,10 +259,17 @@ WAIT 0.5
             # 1. Use global universal speed
             speed = float(self.mw.current_speed)
             
-            # Remove SPEED from parts if it was explicitly typed (cleaning up legacy lines)
-            if "SPEED" in [p.upper() for p in parts]:
-                s_idx = [p.upper() for p in parts].index("SPEED")
-                # Just remove it and skip its value
+            # Search for and handle optional 'SPEED' parameter (e.g., JOINT Shoulder 90 SPEED 10)
+            upper_parts = [p.upper() for p in parts]
+            if "SPEED" in upper_parts:
+                s_idx = upper_parts.index("SPEED")
+                if len(parts) > s_idx + 1:
+                    try:
+                        speed = float(parts[s_idx + 1])
+                        self.mw.log(f"⚡ Override Speed: {speed}%")
+                    except ValueError:
+                        self.mw.log(f"⚠️ Invalid speed value: {parts[s_idx+1]}")
+                # Clean parts so the rest of the parsing (JOINT, WAIT, etc.) ignores the speed suffix
                 parts = parts[:s_idx]
             
             # 2. Identify Command and Joint Name
