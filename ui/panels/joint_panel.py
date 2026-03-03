@@ -160,15 +160,26 @@ class JointPanel(QtWidgets.QWidget):
         self.rotation_slider.setValue(0)
         self.rotation_slider.setStyleSheet("""
             QSlider::groove:horizontal {
-                background: #e0e0e0;
                 height: 8px;
+                background: #f0f0f0;
+                border-radius: 4px;
+                border: 1px solid #ddd;
+            }
+            QSlider::sub-page:horizontal {
+                background: #bbdefb;
                 border-radius: 4px;
             }
             QSlider::handle:horizontal {
-                background: #1976d2;
-                width: 18px;
-                margin: -5px 0;
-                border-radius: 9px;
+                background: white;
+                border: 2px solid #1976d2;
+                width: 16px;
+                height: 16px;
+                margin-top: -5px;
+                margin-bottom: -5px;
+                border-radius: 8px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #e3f2fd;
             }
         """)
         self.rotation_slider.valueChanged.connect(self.on_slider_changed)
@@ -180,16 +191,15 @@ class JointPanel(QtWidgets.QWidget):
         self.rotation_spinbox.setValue(0)
         self.rotation_spinbox.setSuffix("°")
         self.rotation_spinbox.setDecimals(1)
+        self.rotation_spinbox.setFixedWidth(70)
         self.rotation_spinbox.setStyleSheet("""
             QDoubleSpinBox {
-                background-color: white;
+                background: white;
                 color: #1976d2;
-                border: 2px solid #1976d2;
+                border: 1px solid #1976d2;
                 border-radius: 3px;
-                padding: 5px;
-                font-size: 12px;
+                padding: 2px;
                 font-weight: bold;
-                min-width: 80px;
             }
         """)
         self.rotation_spinbox.valueChanged.connect(self.on_spinbox_changed)
@@ -198,7 +208,21 @@ class JointPanel(QtWidgets.QWidget):
         rot_layout.addLayout(slider_row)
         
         # Confirm button
-        self.confirm_joint_btn = QtWidgets.QPushButton("CONFIRM JOINT")
+        self.confirm_joint_btn = QtWidgets.QPushButton("Confirm Joint")
+        self.confirm_joint_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.confirm_joint_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1976d2;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1565c0;
+            }
+        """)
         self.confirm_joint_btn.clicked.connect(self.confirm_joint)
         rot_layout.addWidget(self.confirm_joint_btn)
         
@@ -206,18 +230,43 @@ class JointPanel(QtWidgets.QWidget):
         
         # Parent/Child Selection Buttons
         buttons_container = QtWidgets.QWidget()
-        buttons_container.setStyleSheet("background-color: white; padding: 10px; border: 1px solid #e0e0e0;")
+        buttons_container.setStyleSheet("background-color: transparent; padding: 10px;")
         buttons_layout = QtWidgets.QHBoxLayout(buttons_container)
         buttons_layout.setSpacing(10)
         
+        btn_style = """
+            QPushButton {
+                background-color: white;
+                color: #424242;
+                border: 1px solid #e0e0e0;
+                border-radius: 6px;
+                padding: 10px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                border: 2px solid #1976d2;
+                color: #1976d2;
+                background-color: #e3f2fd;
+            }
+            QPushButton:disabled {
+                background-color: #fafafa;
+                color: #bdbdbd;
+                border: 1px solid #e0e0e0;
+            }
+        """
+        
         # Parent Button
-        self.parent_btn = QtWidgets.QPushButton("parent object")
+        self.parent_btn = QtWidgets.QPushButton("Parent Object")
+        self.parent_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.parent_btn.setStyleSheet(btn_style)
         self.parent_btn.clicked.connect(self.set_as_parent)
         self.parent_btn.setEnabled(False)
         buttons_layout.addWidget(self.parent_btn)
         
         # Child Button
-        self.child_btn = QtWidgets.QPushButton("child object")
+        self.child_btn = QtWidgets.QPushButton("Child Object")
+        self.child_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.child_btn.setStyleSheet(btn_style)
         self.child_btn.clicked.connect(self.set_as_child)
         self.child_btn.setEnabled(False)
         buttons_layout.addWidget(self.child_btn)
@@ -226,15 +275,35 @@ class JointPanel(QtWidgets.QWidget):
         
         # --- UNDO/REDO BUTTONS ---
         undo_redo_container = QtWidgets.QWidget()
-        undo_redo_container.setStyleSheet("background-color: white; padding: 5px; border: 1px solid #e0e0e0;")
+        undo_redo_container.setStyleSheet("background-color: transparent; padding: 5px;")
         undo_redo_layout = QtWidgets.QHBoxLayout(undo_redo_container)
         undo_redo_layout.setSpacing(10)
         
+        undo_redo_style = """
+            QPushButton {
+                background-color: white;
+                color: #424242;
+                border: 1px solid #e0e0e0;
+                border-radius: 6px;
+                padding: 8px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                border: 2px solid #1976d2;
+                color: #1976d2;
+                background-color: #e3f2fd;
+            }
+        """
+        
         self.undo_btn = QtWidgets.QPushButton("Undo")
+        self.undo_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.undo_btn.setStyleSheet(undo_redo_style)
         self.undo_btn.clicked.connect(self.undo_selection)
         undo_redo_layout.addWidget(self.undo_btn)
         
         self.redo_btn = QtWidgets.QPushButton("Redo")
+        self.redo_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.redo_btn.setStyleSheet(undo_redo_style)
         self.redo_btn.clicked.connect(self.redo_selection)
         undo_redo_layout.addWidget(self.redo_btn)
         
@@ -242,25 +311,25 @@ class JointPanel(QtWidgets.QWidget):
         
         # --- JOINT CONTROL SECTION (appears when clicking jointed object) ---
         self.joint_control_section = QtWidgets.QWidget()
-        self.joint_control_section.setStyleSheet("background-color: white; padding: 10px; border: 1px solid #e0e0e0;")
+        self.joint_control_section.setStyleSheet("background-color: transparent; padding: 10px;")
         self.joint_control_section.setVisible(False)
         
         jc_layout = QtWidgets.QVBoxLayout(self.joint_control_section)
         jc_layout.setSpacing(10)
         
         # Header
-        jc_header = QtWidgets.QLabel("JOINT CONTROL")
-        jc_header.setStyleSheet("color: #ff9800; font-size: 14px; font-weight: bold; padding: 5px;")
+        jc_header = QtWidgets.QLabel("Joint Control")
+        jc_header.setStyleSheet("color: #1976d2; font-size: 15px; font-weight: bold; padding: 2px;")
         jc_layout.addWidget(jc_header)
         
         # Joint info
         self.joint_info_label = QtWidgets.QLabel("No joint selected")
-        self.joint_info_label.setStyleSheet("color: #616161; font-size: 11px; padding: 3px;")
+        self.joint_info_label.setStyleSheet("color: #757575; font-size: 13px; padding: 2px;")
         jc_layout.addWidget(self.joint_info_label)
         
         # Control slider
         jc_slider_label = QtWidgets.QLabel("Rotation:")
-        jc_slider_label.setStyleSheet("color: #616161; font-size: 12px; padding: 3px;")
+        jc_slider_label.setStyleSheet("color: #424242; font-size: 13px; padding: 2px;")
         jc_layout.addWidget(jc_slider_label)
         
         jc_slider_row = QtWidgets.QHBoxLayout()
@@ -268,15 +337,26 @@ class JointPanel(QtWidgets.QWidget):
         self.joint_control_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.joint_control_slider.setStyleSheet("""
             QSlider::groove:horizontal {
-                background: #e0e0e0;
                 height: 8px;
+                background: #f0f0f0;
+                border-radius: 4px;
+                border: 1px solid #ddd;
+            }
+            QSlider::sub-page:horizontal {
+                background: #bbdefb;
                 border-radius: 4px;
             }
             QSlider::handle:horizontal {
-                background: #ff9800;
-                width: 18px;
-                margin: -5px 0;
-                border-radius: 9px;
+                background: white;
+                border: 2px solid #1976d2;
+                width: 16px;
+                height: 16px;
+                margin-top: -5px;
+                margin-bottom: -5px;
+                border-radius: 8px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #e3f2fd;
             }
         """)
         self.joint_control_slider.valueChanged.connect(self.on_joint_control_changed)
@@ -285,16 +365,15 @@ class JointPanel(QtWidgets.QWidget):
         self.joint_control_spinbox = QtWidgets.QDoubleSpinBox()
         self.joint_control_spinbox.setSuffix("°")
         self.joint_control_spinbox.setDecimals(1)
+        self.joint_control_spinbox.setFixedWidth(70)
         self.joint_control_spinbox.setStyleSheet("""
             QDoubleSpinBox {
-                background-color: white;
-                color: #ff9800;
-                border: 2px solid #ff9800;
+                background: white;
+                color: #1976d2;
+                border: 1px solid #1976d2;
                 border-radius: 3px;
-                padding: 5px;
-                font-size: 12px;
+                padding: 2px;
                 font-weight: bold;
-                min-width: 80px;
             }
         """)
         self.joint_control_spinbox.valueChanged.connect(self.on_joint_control_spinbox_changed)
@@ -360,16 +439,18 @@ class JointPanel(QtWidgets.QWidget):
             
             # Delete Button
             del_btn = QtWidgets.QPushButton("✕")
-            del_btn.setFixedSize(24, 24)
+            del_btn.setFixedSize(32, 32)
             del_btn.setCursor(QtCore.Qt.PointingHandCursor)
+            del_btn.setAccessibleName("Remove")
+            del_btn.setToolTip("Remove joint")
             del_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: #ffebee;
-                    color: #d32f2f;
-                    border: 1px solid #ffcdd2;
-                    border-radius: 12px;
+                    background-color: transparent;
+                    color: #9e9e9e;
+                    border: 1px solid #e0e0e0;
+                    border-radius: 16px;
                     font-weight: bold;
-                    font-size: 12px;
+                    font-size: 18px;
                 }
                 QPushButton:hover {
                     background-color: #d32f2f;

@@ -23,7 +23,7 @@ class AlignPanel(QtWidgets.QWidget):
 
         # 2. Parent Picking
         layout.addWidget(QtWidgets.QLabel("STEP 1: Pick Parent Face"))
-        self.parent_btn = QtWidgets.QPushButton("SELECT PARENT FACE")
+        self.parent_btn = QtWidgets.QPushButton("Select Parent Face")
         self.parent_btn.clicked.connect(self.pick_parent_face)
         layout.addWidget(self.parent_btn)
         
@@ -34,7 +34,7 @@ class AlignPanel(QtWidgets.QWidget):
 
         # 3. Child Picking
         layout.addWidget(QtWidgets.QLabel("STEP 2: Pick Child Face"))
-        self.child_btn = QtWidgets.QPushButton("SELECT CHILD FACE")
+        self.child_btn = QtWidgets.QPushButton("Select Child Face")
         self.child_btn.clicked.connect(self.pick_child_face)
         layout.addWidget(self.child_btn)
         
@@ -44,7 +44,7 @@ class AlignPanel(QtWidgets.QWidget):
         layout.addSpacing(10)
         
         # Flip Option
-        self.flip_check = QtWidgets.QCheckBox("FLIP DIRECTION")
+        self.flip_check = QtWidgets.QCheckBox("Flip Direction")
         self.flip_check.stateChanged.connect(self.apply_alignment)
         layout.addWidget(self.flip_check)
 
@@ -52,7 +52,7 @@ class AlignPanel(QtWidgets.QWidget):
 
         # 4. Action Buttons
         button_layout = QtWidgets.QHBoxLayout()
-        self.align_btn = QtWidgets.QPushButton("ALIGN COMPONENTS")
+        self.align_btn = QtWidgets.QPushButton("Align Components")
         self.align_btn.clicked.connect(self.apply_alignment)
         button_layout.addWidget(self.align_btn)
         layout.addLayout(button_layout)
@@ -73,13 +73,46 @@ class AlignPanel(QtWidgets.QWidget):
             slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
             slider.setRange(-180, 180)
             slider.setValue(0)
+            slider.setStyleSheet("""
+                QSlider::groove:horizontal {
+                    height: 8px;
+                    background: #f0f0f0;
+                    border-radius: 4px;
+                    border: 1px solid #ddd;
+                }
+                QSlider::sub-page:horizontal {
+                    background: #bbdefb;
+                    border-radius: 4px;
+                }
+                QSlider::handle:horizontal {
+                    background: white;
+                    border: 2px solid #1976d2;
+                    width: 16px;
+                    height: 16px;
+                    margin-top: -5px;
+                    margin-bottom: -5px;
+                    border-radius: 8px;
+                }
+                QSlider::handle:horizontal:hover {
+                    background: #e3f2fd;
+                }
+            """)
             
             spin = QtWidgets.QDoubleSpinBox()
             spin.setRange(-180, 180)
             spin.setDecimals(1)
             spin.setValue(0)
-            spin.setFixedWidth(60)
-            spin.setStyleSheet("background: white; color: #212121; border: 1px solid #bbb;")
+            spin.setFixedWidth(70)
+            spin.setStyleSheet("""
+                QDoubleSpinBox {
+                    background: white;
+                    color: #1976d2;
+                    border: 1px solid #1976d2;
+                    border-radius: 3px;
+                    padding: 2px;
+                    font-weight: bold;
+                }
+            """)
 
             # Bidirectional sync
             slider.valueChanged.connect(lambda val, s=spin: s.setValue(val))
@@ -97,7 +130,7 @@ class AlignPanel(QtWidgets.QWidget):
 
         layout.addSpacing(20)
 
-        self.save_btn = QtWidgets.QPushButton("SAVE & LOCK ASSEMBLY")
+        self.save_btn = QtWidgets.QPushButton("Save & Lock")
         self.save_btn.clicked.connect(self.save_alignment)
         layout.addWidget(self.save_btn)
 
@@ -105,10 +138,10 @@ class AlignPanel(QtWidgets.QWidget):
 
         # 6. History Management (Undo/Redo)
         history_layout = QtWidgets.QHBoxLayout()
-        self.undo_btn = QtWidgets.QPushButton("undo")
+        self.undo_btn = QtWidgets.QPushButton("Undo")
         self.undo_btn.clicked.connect(self.undo_action)
         
-        self.redo_btn = QtWidgets.QPushButton("redo")
+        self.redo_btn = QtWidgets.QPushButton("Redo")
         self.redo_btn.clicked.connect(self.redo_action)
         
         history_layout.addWidget(self.undo_btn)

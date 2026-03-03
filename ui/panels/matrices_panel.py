@@ -27,8 +27,8 @@ class MatricesPanel(QtWidgets.QWidget):
         layout.addWidget(self.text_area)
 
         # Bottom: Joint Control Sliders
-        header_sliders = QtWidgets.QLabel("JOINT ROTATION CONTROLS")
-        header_sliders.setStyleSheet("color: #ff9800; font-size: 14px; font-weight: bold; margin-top: 15px; padding: 5px;")
+        header_sliders = QtWidgets.QLabel("Joint Rotation Controls")
+        header_sliders.setStyleSheet("color: #1976d2; font-size: 15px; font-weight: bold; margin-top: 15px; padding: 5px;")
         layout.addWidget(header_sliders)
 
         self.scroll_area = QtWidgets.QScrollArea()
@@ -62,14 +62,14 @@ class MatricesPanel(QtWidgets.QWidget):
         for child_name, data in joint_data.items():
             # Container for each joint's control
             group = QtWidgets.QFrame()
-            group.setStyleSheet("background-color: #f5f5f5; border-radius: 5px; margin-bottom: 5px; border: 1px solid #e0e0e0;")
+            group.setStyleSheet("background-color: transparent; border-radius: 5px; margin-bottom: 5px;")
             glay = QtWidgets.QVBoxLayout(group)
-            glay.setContentsMargins(10, 5, 10, 5)
+            glay.setContentsMargins(10, 8, 10, 8)
             
             # Label: Custom Name Only
             custom_name = data.get('custom_name', f"{data['parent']} \u2192 {child_name}")
             lbl = QtWidgets.QLabel(f"{custom_name} ({['X','Y','Z'][data['axis']]})")
-            lbl.setStyleSheet("color: #ff9800; font-weight: bold; font-size: 11px;")
+            lbl.setStyleSheet("color: #1976d2; font-weight: bold; font-size: 13px;")
             glay.addWidget(lbl)
             
             # Slider Row
@@ -78,12 +78,47 @@ class MatricesPanel(QtWidgets.QWidget):
             slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
             slider.setRange(int(data['min'] * 10), int(data['max'] * 10))
             slider.setValue(int(data.get('current_angle', 0.0) * 10))
+            slider.setCursor(QtCore.Qt.PointingHandCursor)
+            slider.setStyleSheet("""
+                QSlider::groove:horizontal {
+                    height: 8px;
+                    background: #f0f0f0;
+                    border-radius: 4px;
+                    border: 1px solid #ddd;
+                }
+                QSlider::sub-page:horizontal {
+                    background: #bbdefb;
+                    border-radius: 4px;
+                }
+                QSlider::handle:horizontal {
+                    background: white;
+                    border: 2px solid #1976d2;
+                    width: 16px;
+                    height: 16px;
+                    margin-top: -5px;
+                    margin-bottom: -5px;
+                    border-radius: 8px;
+                }
+                QSlider::handle:horizontal:hover {
+                    background: #e3f2fd;
+                }
+            """)
             
             spin = QtWidgets.QDoubleSpinBox()
             spin.setRange(data['min'], data['max'])
             spin.setValue(data.get('current_angle', 0.0))
-            spin.setFixedWidth(60)
+            spin.setFixedWidth(70)
             spin.setDecimals(1)
+            spin.setStyleSheet("""
+                QDoubleSpinBox {
+                    background: white;
+                    color: #1976d2;
+                    border: 1px solid #1976d2;
+                    border-radius: 3px;
+                    padding: 2px;
+                    font-weight: bold;
+                }
+            """)
             
             # Connect
             slider.valueChanged.connect(lambda v, c=child_name, s=spin: self.on_slider_move(c, v/10.0, s))
