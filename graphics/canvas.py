@@ -55,11 +55,9 @@ class RobotCanvas(QtWidgets.QWidget):
         self.plotter.interactor.AddObserver("LeftButtonPressEvent", self._on_left_down)
         self.plotter.interactor.AddObserver("LeftButtonReleaseEvent", self._on_left_up)
 
-        # Overlay Buttons
-        self.focus_btn = QtWidgets.QPushButton("Focus Base", self)
-        self.focus_btn.setStyleSheet("background-color: #3d3d3d; color: white; border: 1px solid #555; padding: 5px;")
-        self.focus_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        self.focus_btn.resize(100, 30)
+        # 3D Orientation Cube (Standard Navigation)
+        self.plotter.add_camera_orientation_widget()
+        # Optionally style it if needed (PyVista default is high contrast and clear)
 
         self.pivot_btn = QtWidgets.QPushButton("🎯 Point", self)
         self.pivot_btn.setStyleSheet("background-color: #3d3d3d; color: white; border: 1px solid #555; padding: 5px;")
@@ -327,9 +325,8 @@ class RobotCanvas(QtWidgets.QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Top right corner, with some margin
-        self.focus_btn.move(self.width() - 110, 10)
-        self.pivot_btn.move(self.width() - 200, 10) # Position to left of Focus btn
+        # Position available buttons (Pivot btn)
+        self.pivot_btn.move(self.width() - 90, 10) 
 
     def set_pivot_mode(self):
         self.interaction_mode = "pivot"

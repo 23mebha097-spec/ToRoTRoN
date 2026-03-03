@@ -351,8 +351,8 @@ class MainWindow(QtWidgets.QMainWindow):
         
         self.main_layout.addWidget(self.main_splitter)
         
-        # Connect Focus Button from Canvas
-        self.canvas.focus_btn.clicked.connect(self.on_focus_base)
+        # 3D View Callbacks
+        self.canvas.on_drop_callback = self.sync_link_transform
         self.canvas.on_drop_callback = self.sync_link_transform
         self.canvas.on_deselect_callback = self.on_deselect
 
@@ -365,17 +365,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # Reset Align Tool selection state
         self.align_tab.reset_panel()
 
-    def on_focus_base(self):
-        if not self.robot.base_link:
-            self.log("No Base set to focus on.")
-            return
-        
-        base_name = self.robot.base_link.name
-        if base_name in self.canvas.actors:
-            actor = self.canvas.actors[base_name]
-            bounds = actor.GetBounds()
-            self.canvas.focus_on_bounds(bounds)
-            self.log(f"Focused camera on Base: {base_name}")
 
     def sync_link_transform(self, name, matrix):
         """Saves a 3D visual transformation back to the robot link model."""
