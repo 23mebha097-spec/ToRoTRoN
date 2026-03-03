@@ -30,8 +30,8 @@ void setup() {
   ESP32PWM::allocateTimer(2);
   ESP32PWM::allocateTimer(3);
 
-  // Initialize j1
-  joints[0].name = "j1";
+  // Initialize joint_02_03j1
+  joints[0].name = "joint_02_03j1";
   joints[0].current = 90.0;
   joints[0].target = 90.0;
   joints[0].speed = 0.0;

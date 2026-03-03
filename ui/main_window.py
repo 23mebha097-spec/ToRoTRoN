@@ -398,8 +398,8 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         
         self.main_layout.addWidget(self.main_splitter)
         
-        # Connect Focus Button from Canvas
-        self.canvas.focus_btn.clicked.connect(self.on_focus_base)
+        # 3D View Callbacks
+        self.canvas.on_drop_callback = self.sync_link_transform
         self.canvas.on_drop_callback = self.sync_link_transform
         self.canvas.on_deselect_callback = self.on_deselect
 
