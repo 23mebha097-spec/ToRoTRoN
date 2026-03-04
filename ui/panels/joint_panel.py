@@ -430,9 +430,43 @@ class JointPanel(QtWidgets.QWidget):
             
             # Label: Custom Name Only
             display_name = data.get('custom_name', f"{data['parent']} \u2192 {child_name}")
+            
+            # Check for relations (Master or Slave)
+            joint_id = data.get('joint_id', child_name)
+            is_master = joint_id in self.mw.robot.joint_relations and self.mw.robot.joint_relations[joint_id]
+            
+            # Check if this joint is a slave of any other joint
+            is_slave = False
+            for master, slaves in self.mw.robot.joint_relations.items():
+                if any(s_id == joint_id for s_id, r in slaves):
+                    is_slave = True
+                    break
+            
+            # Show "R" badge if involved in any relation
+            if is_master or is_slave:
+                r_badge = QtWidgets.QLabel("R")
+                r_badge.setToolTip("Joint Relation Active")
+                r_badge.setAlignment(QtCore.Qt.AlignCenter)
+                r_badge.setFixedSize(22, 22)
+                r_badge.setStyleSheet("""
+                    background-color: #673ab7;
+                    color: white;
+                    border-radius: 11px;
+                    font-weight: bold;
+                    font-size: 11px;
+                """)
+                item_layout.addWidget(r_badge)
+
             label = QtWidgets.QLabel(display_name)
             label.setStyleSheet("color: #212121; font-size: 13px; font-weight: bold;")
             item_layout.addWidget(label)
+
+            # --- Master Only Icons ---
+            if is_master:
+                # Relationship Count Info
+                count_lbl = QtWidgets.QLabel(f"\ud83d\udd17({len(self.mw.robot.joint_relations[joint_id])})")
+                count_lbl.setStyleSheet("color: #4caf50; font-size: 10px; font-weight: bold; padding: 2px;")
+                item_layout.addWidget(count_lbl)
 
             # Rename Button
             rename_btn = QtWidgets.QPushButton("\u270e") # Pencil icon
@@ -454,6 +488,33 @@ class JointPanel(QtWidgets.QWidget):
             """)
             rename_btn.clicked.connect(lambda checked, n=child_name: self.rename_joint(n))
             item_layout.addWidget(rename_btn)
+            
+            # Relation/Edit Button
+            # Use a gear icon if relation exists, or pencil-link
+            relation_btn = QtWidgets.QPushButton("\u2699" if is_master else "\ud83d\udd17") 
+            relation_btn.setFixedSize(28, 28)
+            relation_btn.setCursor(QtCore.Qt.PointingHandCursor)
+            relation_btn.setToolTip("Edit Relation Feature" if is_master else "Add Joint Relation")
+            
+            # Style differently if master
+            rel_color = "#9c27b0" if is_master else "#4caf50" # Purple for edit, Green for add
+            rel_bg = "#f3e5f5" if is_master else "#e8f5e9"
+            
+            relation_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: transparent;
+                    color: {rel_color};
+                    border: 1px solid {rel_bg};
+                    border-radius: 4px;
+                    font-size: 18px;
+                }}
+                QPushButton:hover {{
+                    background-color: {rel_color};
+                    color: white;
+                }}
+            """)
+            relation_btn.clicked.connect(lambda checked, n=child_name: self.add_joint_relation_ui(n))
+            item_layout.addWidget(relation_btn)
             
             item_layout.addStretch()
             
@@ -567,6 +628,93 @@ class JointPanel(QtWidgets.QWidget):
 
             self.refresh_joints_history()
             self.mw.log(f"Joint renamed to: {new_custom_name}")
+
+    def add_joint_relation_ui(self, master_child_name):
+        """UI to add a relation between joints"""
+        if master_child_name not in self.joints:
+            return
+            
+        master_data = self.joints[master_child_name]
+        master_id = master_data.get('joint_id', master_child_name)
+        
+        # Get all other joints
+        other_joints = []
+        for c_name, data in self.joints.items():
+            if c_name != master_child_name:
+                display_name = data.get('custom_name', c_name)
+                other_joints.append((display_name, data.get('joint_id', c_name), c_name))
+        
+        if not other_joints:
+            QtWidgets.QMessageBox.warning(self, "No Other Joints", "There are no other joints to relate to.")
+            return
+            
+        # Create dialog
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle(f"Add Relation to {master_data.get('custom_name', master_child_name)}")
+        dialog.setMinimumWidth(300)
+        
+        d_layout = QtWidgets.QVBoxLayout(dialog)
+        
+        label = QtWidgets.QLabel("Select slave joints and ratio (e.g. 1.0 same, -1.0 opposite):")
+        label.setWordWrap(True)
+        d_layout.addWidget(label)
+        
+        # List of other joints with checkboxes and ratios
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_widget = QtWidgets.QWidget()
+        scroll_layout = QtWidgets.QVBoxLayout(scroll_widget)
+        
+        slave_rows = []
+        for display_name, j_id, c_name in other_joints:
+            row = QtWidgets.QHBoxLayout()
+            cb = QtWidgets.QCheckBox(display_name)
+            ratio_spin = QtWidgets.QDoubleSpinBox()
+            ratio_spin.setRange(-10, 10)
+            ratio_spin.setValue(1.0)
+            ratio_spin.setSingleStep(0.1)
+            ratio_spin.setFixedWidth(60)
+            
+            # Check if relation already exists
+            existing_ratio = None
+            if master_id in self.mw.robot.joint_relations:
+                for s_id, r in self.mw.robot.joint_relations[master_id]:
+                    if s_id == j_id:
+                        existing_ratio = r
+                        break
+            
+            if existing_ratio is not None:
+                cb.setChecked(True)
+                ratio_spin.setValue(existing_ratio)
+            
+            row.addWidget(cb)
+            row.addWidget(QtWidgets.QLabel("Ratio:"))
+            row.addWidget(ratio_spin)
+            scroll_layout.addLayout(row)
+            slave_rows.append((cb, ratio_spin, j_id, c_name))
+            
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_widget)
+        d_layout.addWidget(scroll)
+        
+        # Buttons
+        btns = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        btns.accepted.connect(dialog.accept)
+        btns.rejected.connect(dialog.reject)
+        d_layout.addWidget(btns)
+        
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            # Clear existing relations for this master in the model (we'll rebuild)
+            if master_id in self.mw.robot.joint_relations:
+                self.mw.robot.joint_relations[master_id] = []
+                
+            for cb, ratio_spin, j_id, c_name in slave_rows:
+                if cb.isChecked():
+                    ratio = ratio_spin.value()
+                    self.mw.robot.add_joint_relation(master_id, j_id, ratio)
+                    self.mw.log(f"Relation added: {master_id} -> {j_id} (ratio: {ratio})")
+            
+            self.mw.log(f"Joint relations updated for {master_id}.")
 
     def select_object(self, name):
         """Selection logic for external calls"""
@@ -1040,6 +1188,34 @@ class JointPanel(QtWidgets.QWidget):
                 
             # 7. Push updated transforms to the 3D viewer
             self.mw.canvas.update_transforms(self.mw.robot)
+
+            # 8. Propagate to related joints
+            joint_id = self.joints[child_name].get('joint_id', child_name)
+            if joint_id in self.mw.robot.joint_relations:
+                for slave_id, ratio in self.mw.robot.joint_relations[joint_id]:
+                    slave_angle = angle_deg * ratio
+                    # Find which child link this slave_id belongs to
+                    slave_child_name = None
+                    for c_n, data in self.joints.items():
+                        if data.get('joint_id') == slave_id:
+                            slave_child_name = c_n
+                            break
+                    
+                    if slave_child_name:
+                        # Avoid infinite recursion if there are circular relations (though we should avoid them)
+                        # We use a simpler update for slaves to avoid re-triggering this method
+                        slave_joint = self.mw.robot.joints.get(slave_id)
+                        if slave_joint:
+                            slave_joint.current_value = slave_angle
+                            self.joints[slave_child_name]['current_angle'] = slave_angle
+                            
+                            # Update MatricesPanel if it exists
+                            if hasattr(self.mw, 'matrices_tab'):
+                                self.mw.matrices_tab.sync_slider(slave_child_name, slave_angle)
+                
+                # After updating all slaves, re-calc kinematics and update canvas once
+                self.mw.robot.update_kinematics()
+                self.mw.canvas.update_transforms(self.mw.robot)
 
     def reset_joint_ui(self):
         """Reset the joint creation UI"""

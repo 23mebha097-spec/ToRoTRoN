@@ -69,6 +69,12 @@ class Robot:
         self.links = {}
         self.joints = {}
         self.base_link = None
+        self.joint_relations = {} # {master_name: [(slave_name, ratio), ...]}
+
+    def add_joint_relation(self, master, slave, ratio=1.0):
+        if master not in self.joint_relations:
+            self.joint_relations[master] = []
+        self.joint_relations[master].append((slave, ratio))
 
     def add_link(self, name, mesh=None):
         link = Link(name, mesh)
@@ -135,6 +141,14 @@ class Robot:
             
         # Clear child's reference to parent
         child.parent_joint = None
+        
+        # Cleanup relations
+        if name in self.joint_relations:
+            del self.joint_relations[name]
+            
+        # Remove from other's relations as slave
+        for master, slaves in self.joint_relations.items():
+            self.joint_relations[master] = [(s, r) for s, r in slaves if s != name]
         
         # Remove from robot's global dict
         del self.joints[name]
