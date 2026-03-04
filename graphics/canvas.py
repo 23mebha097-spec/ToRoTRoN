@@ -606,16 +606,27 @@ class RobotCanvas(QtWidgets.QWidget):
             # --- ENGINEERING CONSTRAINT: LOCKED/ALIGNED COMPONENTS ---
             # If a link has a parent joint (i.e., it is aligned/attached to something),
             # it should NOT be moveable by the free-drag tool. It is "Constrained".
-            # We access the Robot model via MainWindow to check this.
+            # Also blocks components that have been through alignment (exist in alignment_cache).
             if hasattr(self.window(), 'robot') and clicked_name:
                 robot = self.window().robot
                 if clicked_name in robot.links:
                     link = robot.links[clicked_name]
+                    
+                    # Check 1: Jointed (has a parent joint)
                     if link.parent_joint:
-                        self.mw_log(f"\u26a0 Locked: '{clicked_name}' is aligned/jointed. Unjoint/reset transform to move freely.")
+                        self.mw_log(f"\u26a0 Locked: '{clicked_name}' is jointed. Remove the joint first to move freely.")
                         self.select_actor(clicked_name) # Select it visually
                         self.plotter.interactor.GetInteractorStyle().OnLeftButtonDown() # Allow camera rotate
                         return
+                    
+                    # Check 2: Aligned (exists in alignment_cache as child)
+                    if hasattr(self.window(), 'alignment_cache'):
+                        for (parent, child), pt in self.window().alignment_cache.items():
+                            if child == clicked_name:
+                                self.mw_log(f"\u26a0 Locked: '{clicked_name}' is aligned to '{parent}'. Undo alignment first to move freely.")
+                                self.select_actor(clicked_name)
+                                self.plotter.interactor.GetInteractorStyle().OnLeftButtonDown()
+                                return
             
             # --- ALIGNMENT MODE LOCK ---
             # If a component is currently being used for alignment (face picked), 
