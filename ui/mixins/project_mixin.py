@@ -39,8 +39,12 @@ class ProjectMixin:
                         "program_code": "",
                         "live_sync": False,
                         "alignment_point": None,
-                        "alignment_normal": None
-                    }
+                        "alignment_normal": None,
+                        "alignment_cache": {},
+                        "current_speed": 50,
+                        "camera_position": None
+                    },
+                    "joint_relations": {}
                 }
 
                 # 1. Gather Links
@@ -73,6 +77,10 @@ class ProjectMixin:
                         "current_value": joint.current_value
                     })
 
+                # 2b. Joint Relations
+                for master_id, slaves in self.robot.joint_relations.items():
+                    robot_data["joint_relations"][master_id] = slaves
+
                 # 3. Gather UI State
                 # Joint Panel UI Data
                 if hasattr(self, 'joint_tab'):
@@ -93,6 +101,22 @@ class ProjectMixin:
                         robot_data["ui_state"]["alignment_point"] = self.align_tab.alignment_point.tolist()
                     if hasattr(self.align_tab, 'alignment_normal') and self.align_tab.alignment_normal is not None:
                         robot_data["ui_state"]["alignment_normal"] = self.align_tab.alignment_normal.tolist()
+
+                # Alignment Cache (from MainWindow)
+                if hasattr(self, 'alignment_cache'):
+                    # Convert {(p, c): point} to {"p,c": point} for JSON
+                    serializable_cache = {}
+                    for (p, c), pt in self.alignment_cache.items():
+                        serializable_cache[f"{p}|||{c}"] = pt.tolist()
+                    robot_data["ui_state"]["alignment_cache"] = serializable_cache
+
+                # Speed
+                if hasattr(self, 'current_speed'):
+                    robot_data["ui_state"]["current_speed"] = self.current_speed
+
+                # Camera Position
+                if hasattr(self, 'canvas'):
+                    robot_data["ui_state"]["camera_position"] = [list(p) for p in self.canvas.plotter.camera_position]
 
                 # 4. Write JSON
                 json_path = os.path.join(temp_dir, "robot.json")
@@ -138,6 +162,7 @@ class ProjectMixin:
                 self.canvas.remove_actor(name)
             self.canvas.fixed_actors.clear()
             self.links_list.clear()
+            self.alignment_cache = {}
 
             # Reset UI Panels
             if hasattr(self, 'joint_tab'): self.joint_tab.reset_joint_ui()
@@ -195,6 +220,9 @@ class ProjectMixin:
                         joint.max_limit = j_data.get("max_limit", 180.0)
                         joint.current_value = j_data.get("current_value", 0.0)
 
+                # 5b. Load Joint Relations
+                self.robot.joint_relations = robot_data.get("joint_relations", {})
+
                 # 6. Load UI State
                 ui_state = robot_data.get("ui_state", {})
                 
@@ -220,6 +248,34 @@ class ProjectMixin:
                     if ap: self.align_tab.alignment_point = np.array(ap)
                     an = ui_state.get("alignment_normal")
                     if an: self.align_tab.alignment_normal = np.array(an)
+                
+                # Restore Alignment Cache
+                cache_data = ui_state.get("alignment_cache", {})
+                for key, pt in cache_data.items():
+                    if "|||" in key:
+                        p, c = key.split("|||")
+                        self.alignment_cache[(p, c)] = np.array(pt)
+
+                # Restore Speed
+                if "current_speed" in ui_state:
+                    self.current_speed = ui_state["current_speed"]
+                    if hasattr(self, 'speed_slider'):
+                        self.speed_slider.blockSignals(True)
+                        self.speed_slider.setValue(self.current_speed)
+                        self.speed_slider.blockSignals(False)
+                    if hasattr(self, 'speed_spin'):
+                        self.speed_spin.blockSignals(True)
+                        self.speed_spin.setValue(self.current_speed)
+                        self.speed_spin.blockSignals(False)
+                
+                # Restore Camera
+                if "camera_position" in ui_state and ui_state["camera_position"]:
+                    try:
+                        self.canvas.plotter.camera_position = [tuple(p) for p in ui_state["camera_position"]]
+                    except:
+                        self.canvas.plotter.reset_camera()
+                else:
+                    self.canvas.plotter.reset_camera()
 
             # 7. Final Update
             self.robot.update_kinematics()
