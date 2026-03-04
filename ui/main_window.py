@@ -224,7 +224,47 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         # Right Side - Vertical Splitter (Canvas on top, Console on bottom)
         self.right_splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
         
+        # --- CANVAS AREA ---
         self.canvas = RobotCanvas()
+        
+        # Add a floating Isometric View button directly to the canvas
+        # We use a white circular button with a 'Home' icon
+        self.iso_btn = QtWidgets.QPushButton("⌂", self.canvas)
+        self.iso_btn.setToolTip("Reset to Isometric View")
+        self.iso_btn.setFixedSize(38, 38)
+        self.iso_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.iso_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                color: #1976d2;
+                border: 2px solid #e0e0e0;
+                border-radius: 19px;
+                font-size: 24px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #f5f5f5;
+                border-color: #1976d2;
+                color: #1565c0;
+            }
+            QPushButton:pressed {
+                background-color: #e3f2fd;
+            }
+        """)
+        self.iso_btn.clicked.connect(lambda: self.canvas.view_isometric())
+        
+        # Initial position (Top Right, offset to the left of orientation cube)
+        self.iso_btn.move(self.canvas.width() - 160, 24) 
+        
+        # Proper way to handle repositioning on resize
+        original_resize = self.canvas.resizeEvent
+        def patched_resize(event):
+            original_resize(event) # Call existing logic
+            # Keep it pinned to the top-right but offset to the left of the cube
+            self.iso_btn.move(self.canvas.width() - 160, 24)
+            
+        self.canvas.resizeEvent = patched_resize
+        
         self.right_splitter.addWidget(self.canvas)
         
         self.console = QtWidgets.QTextEdit()

@@ -19,13 +19,12 @@ class RobotCanvas(QtWidgets.QWidget):
         self.plotter.set_background("white")
         self.plotter.add_axes()
         
-        # Bounded grid with simplified labels
-        self.plotter.show_bounds(
-            xtitle="X", ytitle="Y", ztitle="Z",
-            n_xlabels=2, n_ylabels=2, n_zlabels=2,
-            fmt="",
-            all_edges=True
-        )
+        # Custom dynamic grid system (3D Graph)
+        self._init_custom_grids()
+        
+        # Observe camera changes to update grid visibility
+        self.plotter.interactor.AddObserver("InteractionEvent", self._on_camera_change)
+        self.plotter.interactor.AddObserver("ModifiedEvent", self._on_camera_change)
 
         # Clean up UI: Removed all bounded boxes and distracting numbers
         try:
@@ -54,16 +53,18 @@ class RobotCanvas(QtWidgets.QWidget):
         self.plotter.interactor.AddObserver("MouseMoveEvent", self._on_mouse_move)
         self.plotter.interactor.AddObserver("LeftButtonPressEvent", self._on_left_down)
         self.plotter.interactor.AddObserver("LeftButtonReleaseEvent", self._on_left_up)
+        self.plotter.interactor.AddObserver("MouseWheelForwardEvent", self._on_wheel_forward)
+        self.plotter.interactor.AddObserver("MouseWheelBackwardEvent", self._on_wheel_backward)
 
         # 3D Orientation Cube (Standard Navigation)
         self.plotter.add_camera_orientation_widget()
         # Optionally style it if needed (PyVista default is high contrast and clear)
+        
+        # Initial grid update
+        QtCore.QTimer.singleShot(100, self._on_camera_change)
 
-        self.pivot_btn = QtWidgets.QPushButton("🎯 Point", self)
-        self.pivot_btn.setStyleSheet("background-color: #3d3d3d; color: white; border: 1px solid #555; padding: 5px;")
-        self.pivot_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        self.pivot_btn.resize(80, 30)
-        self.pivot_btn.clicked.connect(self.set_pivot_mode)
+        # Keyboard Shortcut: Escape to deselect everything
+        self.plotter.add_key_event("Escape", self.deselect_all)
 
         self.on_face_picked_callback = None
         self.on_drop_callback = None
@@ -72,10 +73,7 @@ class RobotCanvas(QtWidgets.QWidget):
         self.picking_color = "orange"
         self.enable_drag = True
         
-        self.interaction_mode = "rotate" # 'rotate', 'pivot'
-
-        # Keyboard Shortcut: Escape to deselect everything
-        self.plotter.add_key_event("Escape", self.deselect_all)
+        self.interaction_mode = "rotate" # 'rotate'
 
     def _dist_point_to_segment(self, p, a, b):
         """Calculates distance from point p to line segment (a, b)"""
@@ -325,14 +323,6 @@ class RobotCanvas(QtWidgets.QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Position available buttons (Pivot btn)
-        self.pivot_btn.move(self.width() - 90, 10) 
-
-    def set_pivot_mode(self):
-        self.interaction_mode = "pivot"
-        self.pivot_set = False # Reset state so we can pick a new point
-        self.pivot_btn.setStyleSheet("background-color: #4CAF50; color: white; border: 1px solid #555; padding: 5px;") # Green active
-        self.mw_log("Mode: Pivot Point. Click ONCE to set, then rotate.")
 
     def mw_log(self, msg):
         # Helper to log back to main window if possible
@@ -343,22 +333,10 @@ class RobotCanvas(QtWidgets.QWidget):
 
     def deselect_all(self):
         """Standard CAD behavior: Escape or blank click clears everything."""
-        
-        # 1. PRIORITY: If in Pivot Mode, just exit that mode and return
-        if self.interaction_mode == "pivot":
-            self.interaction_mode = "rotate"
-            self.pivot_set = False
-            self.pivot_btn.setStyleSheet("background-color: #3d3d3d; color: white; border: 1px solid #555; padding: 5px;")
-            self.plotter.remove_actor("pivot_marker")
-            self.mw_log("Exited Pivot Mode.")
-            self.plotter.render()
-            return # <--- EXIT HERE, don't clear selection
-
-        # 2. Standard Deselect (only if NOT in pivot mode)
+        # Standard Deselect
         self.selected_name = None
         self.is_dragging = False
         self.picking_face = False
-        self.pivot_set = False 
         
         # Reset visual highlights (Edge Colors)
         for actor in self.actors.values():
@@ -386,6 +364,58 @@ class RobotCanvas(QtWidgets.QWidget):
         """Resets camera to fit the specified bounds."""
         self.plotter.reset_camera(bounds=bounds)
         self.plotter.render()
+
+    def view_isometric(self):
+        """
+        Standard CAD Isometric view: Frames all objects in the scene while 
+        ignoring the background grid. If objects are far from the center, 
+        it 'locates' them and brings them into focus.
+        """
+        # 1. Collect all model actors (exclude grids/ghosts)
+        model_actors = [v for k, v in self.actors.items() if k in self.actors]
+        
+        if not model_actors:
+            # If no model exists, just show the base grid at a sensible zoom
+            self.plotter.view_isometric()
+            self.plotter.reset_camera()
+        else:
+            # 2. Calculate the total bounding box of all components
+            xmin, xmax, ymin, ymax, zmin, zmax = 1e9, -1e9, 1e9, -1e9, 1e9, -1e9
+            for actor in model_actors:
+                b = actor.GetBounds()
+                xmin, xmax = min(xmin, b[0]), max(xmax, b[1])
+                ymin, ymax = min(ymin, b[2]), max(ymax, b[3])
+                zmin, zmax = min(zmin, b[4]), max(zmax, b[5])
+            
+            # 3. Apply standard Isometric camera direction (1,1,1)
+            self.plotter.camera_position = 'iso'
+            
+            # 4. Snap and Frame the objects
+            self.plotter.reset_camera(bounds=(xmin, xmax, ymin, ymax, zmin, zmax))
+            
+        self.plotter.render()
+        self._on_camera_change() 
+
+    def focus_on_actor(self, name):
+        """Snaps to isometric view and frames ONLY the specified actor."""
+        if name not in self.actors:
+            return
+            
+        actor = self.actors[name]
+        bounds = actor.GetBounds()
+        
+        # Set Isometric view
+        self.plotter.camera_position = 'iso'
+        # Frame only this specific actor
+        self.plotter.reset_camera(bounds=bounds)
+        self.plotter.render()
+        self._on_camera_change()
+
+    def view_top(self):
+        """Snaps camera to top view."""
+        self.plotter.view_xy()
+        self.plotter.render()
+        self._on_camera_change() # Update grids
 
     def start_object_picking(self, callback, label="Object"):
         """Activates silent object picking - returns name without highlighting"""
@@ -526,32 +556,6 @@ class RobotCanvas(QtWidgets.QWidget):
             self.mw_log(f"Point picked: {np.round(picked_pos, 2)}")
             return # Block other interactions
 
-        if self.interaction_mode == "pivot":
-            # ONE-SHOT LOGIC: If pivot is already set, just rotate around it.
-            if self.pivot_set:
-                self.plotter.interactor.GetInteractorStyle().OnLeftButtonDown()
-                return
-
-            # 1. Pick the point under cursor
-            self.plotter.picker.Pick(click_pos[0], click_pos[1], 0, self.plotter.renderer)
-            picked_pos = self.plotter.picker.GetPickPosition()
-            
-            # 2. Set Focal Point (Pivot)
-            self.plotter.camera.focal_point = picked_pos
-            
-            # 3. Show Feedback (Tiny Sphere)
-            self.plotter.remove_actor("pivot_marker")
-            sphere = pv.Sphere(radius=0.05, center=picked_pos) 
-            self.plotter.add_mesh(sphere, color="red", name="pivot_marker", pickable=False)
-            
-            self.pivot_set = True # LOCK the pivot
-            self.mw_log(f"Pivot LOCKED at: {np.round(picked_pos, 2)}. Press Esc to reset.")
-            
-            # 4. Delegate to default Interactor Style (Rotate)
-            self.plotter.interactor.GetInteractorStyle().OnLeftButtonDown()
-                
-            return
-        
         # CASE 0: FACE PICKING IN PROGRESS
         if self.picking_face:
             if self._on_face_pick_click(click_pos):
@@ -642,7 +646,16 @@ class RobotCanvas(QtWidgets.QWidget):
             if found:
                 return # Stop event here (don't rotate camera)
 
-        # CASE 3: We clicked on empty space
+        # CASE 3: We clicked on empty space or we are starting a camera interaction
+        # AUTO-PIVOT: If we have a hover point, set it as the center of rotation now.
+        if hasattr(self, '_current_hover_pt') and self._current_hover_pt is not None:
+            P = self._current_hover_pt
+            old_focal = np.array(self.plotter.camera.focal_point)
+            offset = P - old_focal
+            # Update position and focal point to pan to the new pivot silently
+            self.plotter.camera.position = np.array(self.plotter.camera.position) + offset
+            self.plotter.camera.focal_point = P
+
         # Just rotate the camera, do NOT select anything
         self.plotter.interactor.GetInteractorStyle().OnLeftButtonDown()
 
@@ -711,7 +724,69 @@ class RobotCanvas(QtWidgets.QWidget):
                 self.plotter.render()
             return 
             
+        # --- DYNAMIC CAMERA TRACKING (POTENTIAL PIVOT) ---
+        # We track the point under the cursor so we can zoom/rotate around it live.
+        if not self.is_dragging and not self.picking_face and not getattr(self, 'picking_point', False):
+            curr_pos = self.plotter.interactor.GetEventPosition()
+            self.cell_picker.Pick(curr_pos[0], curr_pos[1], 0, self.plotter.renderer)
+            picked_actor = self.cell_picker.GetActor()
+            
+            if picked_actor and picked_actor in self.actors.values():
+                # We store the point but we DON'T move the camera yet 
+                # to avoid jumpy "sliding" views while simply hovering.
+                self._current_hover_pt = np.array(self.cell_picker.GetPickPosition())
+            else:
+                self._current_hover_pt = None
+                
         self.plotter.interactor.GetInteractorStyle().OnMouseMove()
+
+    def _on_wheel_forward(self, obj, event):
+        self._zoom_at_cursor(1.2)
+        try:
+            obj.SetAbortFlag(1) # Block default zoom
+        except:
+            pass
+
+    def _on_wheel_backward(self, obj, event):
+        self._zoom_at_cursor(1.0/1.2)
+        try:
+            obj.SetAbortFlag(1) # Block default zoom
+        except:
+            pass
+
+    def _zoom_at_cursor(self, amount):
+        """
+        Dolly zoom towards the current mouse position. 
+        Calculates new camera position and focal point such that the 
+        point under the cursor remains at the same pixel location.
+        """
+        curr_pos = self.plotter.interactor.GetEventPosition()
+        self.cell_picker.Pick(curr_pos[0], curr_pos[1], 0, self.plotter.renderer)
+        picked_actor = self.cell_picker.GetActor()
+        
+        # Determine the pivot point for the zoom
+        if picked_actor and picked_actor in self.actors.values():
+            P = np.array(self.cell_picker.GetPickPosition())
+        elif hasattr(self, '_current_hover_pt') and self._current_hover_pt is not None:
+            P = self._current_hover_pt
+        else:
+            # Fallback: Zoom towards current focal point if nothing is under mouse
+            P = np.array(self.plotter.camera.focal_point)
+
+        C = np.array(self.plotter.camera.position)
+        F = np.array(self.plotter.camera.focal_point)
+        
+        # Zoom Factor (Scale around P)
+        # s > 1 means zooming in (C and F move towards P)
+        scale = 1.0 / amount
+        
+        new_C = P + (C - P) * scale
+        new_F = P + (F - P) * scale
+        
+        # Apply transformation
+        self.plotter.camera.position = new_C
+        self.plotter.camera.focal_point = new_F
+        self.plotter.render()
     def update_link_mesh(self, link_name, mesh, transform, color="silver"):
         """Adds or updates a link mesh in the scene."""
         if link_name in self.actors:
@@ -772,7 +847,77 @@ class RobotCanvas(QtWidgets.QWidget):
         self.plotter.render()
 
 
-    # ── JOINT MOTION TRAIL (Ghost Shadows) ──────────────────────────────────
+    def _init_custom_grids(self):
+        """Creates the 3 principal plane grids for the '3D Graph' system."""
+        self.grids = {}
+        size = 10.0  # Compact workspace
+        res = 100    # Much higher density (0.1 unit spacing)
+        
+        # 1. XY Grid (Bottom/Top) - Blueish tint
+        xy_mesh = pv.Plane(center=(0, 0, 0), direction=(0, 0, 1), i_size=size, j_size=size, i_resolution=res, j_resolution=res)
+        self.grids['xy'] = self.plotter.add_mesh(xy_mesh, color="#e3f2fd", opacity=0.3, 
+                                               show_edges=True, edge_color="#1565c0", line_width=1,
+                                               name="grid_xy", pickable=False, lighting=False)
+        
+        # 2. XZ Grid (Front/Back) - Greenish tint
+        xz_mesh = pv.Plane(center=(0, 0, 0), direction=(0, 1, 0), i_size=size, j_size=size, i_resolution=res, j_resolution=res)
+        self.grids['xz'] = self.plotter.add_mesh(xz_mesh, color="#e8f5e9", opacity=0.3, 
+                                               show_edges=True, edge_color="#2e7d32", line_width=1,
+                                               name="grid_xz", pickable=False, lighting=False)
+        
+        # 3. YZ Grid (Left/Right) - Reddish tint
+        yz_mesh = pv.Plane(center=(0, 0, 0), direction=(1, 0, 0), i_size=size, j_size=size, i_resolution=res, j_resolution=res)
+        self.grids['yz'] = self.plotter.add_mesh(yz_mesh, color="#ffebee", opacity=0.3, 
+                                               show_edges=True, edge_color="#c62828", line_width=1,
+                                               name="grid_yz", pickable=False, lighting=False)
+        
+        # Initially hide all except XY
+        for name, actor in self.grids.items():
+            actor.SetVisibility(name == 'xy')
+
+    def _on_camera_change(self, *args):
+        """Dynamically toggles grid visibility based on camera orientation."""
+        # Get normalized direction vector from camera to focal point
+        pos = np.array(self.plotter.camera.position)
+        focal = np.array(self.plotter.camera.focal_point)
+        direction = focal - pos
+        direction /= np.linalg.norm(direction)
+        
+        # Absolute components to detect alignment with axes
+        abs_dir = np.abs(direction)
+        
+        # Threshold for 'snapped' or 'near-snapped' view
+        tol = 0.95
+        
+        # Determine which grid to show
+        show_xy = abs_dir[2] > tol # Looking mostly along Z (Top/Bottom)
+        show_xz = abs_dir[1] > tol # Looking mostly along Y (Front/Back)
+        show_yz = abs_dir[0] > tol # Looking mostly along X (Left/Right)
+        
+        # Special case: If we are in free-rotation (isometric-ish), default to XY or hide?
+        # User said "if i am seeng topview show me side plans grid only ... applied for all sides"
+        # This implies when NOT in side view, maybe we show nothing or just a base grid.
+        # Let's show XY as a default ground plane if not snapped to a side.
+        
+        is_snapped = show_xy or show_xz or show_yz
+        
+        if not is_snapped:
+            # Optionally show a faint XY grid in 3D view
+            self.grids['xy'].SetVisibility(True)
+            self.grids['xy'].GetProperty().SetOpacity(0.15)
+            self.grids['xz'].SetVisibility(False)
+            self.grids['yz'].SetVisibility(False)
+        else:
+            self.grids['xy'].SetVisibility(show_xy)
+            self.grids['xy'].GetProperty().SetOpacity(0.5 if show_xy else 0.3)
+            
+            self.grids['xz'].SetVisibility(show_xz)
+            self.grids['xz'].GetProperty().SetOpacity(0.5 if show_xz else 0.3)
+            
+            self.grids['yz'].SetVisibility(show_yz)
+            self.grids['yz'].GetProperty().SetOpacity(0.5 if show_yz else 0.3)
+        
+        # self.plotter.render() # Observer might already trigger render, but safe to call
     def _init_ghost_system(self):
         """Initialize ghost trail tracking (called lazily on first use)."""
         if not hasattr(self, '_ghost_data'):

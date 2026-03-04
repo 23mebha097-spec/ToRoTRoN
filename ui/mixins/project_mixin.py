@@ -177,7 +177,7 @@ class ProjectMixin:
                         self.canvas.fixed_actors.add(name)
 
                     # Add to UI and Canvas
-                    self.links_list.addItem(name)
+                    self.add_link_item(name)
                     self.canvas.update_link_mesh(name, mesh, link.t_offset, color=link.color)
 
                 # 5. Load Joints (Robot Core)

@@ -1,4 +1,4 @@
-from PyQt5 import QtWidgets, QtGui
+from PyQt5 import QtWidgets, QtGui, QtCore
 import numpy as np
 import os
 import random
@@ -227,23 +227,33 @@ class LinksMixin:
                 # Assign a random distinct color
                 colors = ["#e74c3c", "#3498db", "#2ecc71", "#f1c40f", "#9b59b6", "#1abc9c", "#e67e22", "#95a5a6"]
                 link_color = random.choice(colors)
-                
+
                 name = os.path.basename(file_path).split('.')[0]
+                
+                # Handle unique naming
+                base_name = name
+                counter = 1
+                while name in self.robot.links:
+                    name = f"{base_name}_{counter}"
+                    counter += 1
+                
                 link = self.robot.add_link(name, mesh)
                 link.color = link_color
-                self.links_list.addItem(name)
                 
-                # Initially show it at (1, 1, 1) as requested
+                # Use new helper to add row with 'Eye' button
+                self.add_link_item(name)
+                
+                # Position
                 t_import = np.eye(4)
                 t_import[:3, 3] = [1.0, 1.0, 1.0]
                 link.t_offset = t_import
                 
                 self.canvas.update_link_mesh(name, mesh, t_import, color=link.color)
-                self.log(f"Successfully loaded: {name} at (1, 1, 1)")
+                self.log(f"Successfully loaded: {name}")
                 
-                # Force camera reset
-                self.canvas.plotter.render()
-                self.canvas.plotter.reset_camera()
+                # Auto-select and focus
+                self.canvas.select_actor(name)
+                self.canvas.focus_on_actor(name)
                 
                 self.update_link_colors()
                 
@@ -255,3 +265,43 @@ class LinksMixin:
                     "Please restart the app once the installation finishes.")
             except Exception as e:
                 self.log(f"Error: {str(e)}")
+
+    def add_link_item(self, name):
+        """Helper to add an item to the list with a nested 'Eye' focus button."""
+        item = QtWidgets.QListWidgetItem(self.links_list)
+        item.setText(name)
+        
+        # Create custom widget for the row
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(widget)
+        layout.setContentsMargins(10, 2, 5, 2)
+        
+        # Label with Name
+        name_label = QtWidgets.QLabel(name)
+        name_label.setStyleSheet("border: none;")
+        layout.addWidget(name_label)
+        layout.addStretch()
+        
+        # 'Eye' Focus Button
+        eye_btn = QtWidgets.QPushButton("👁") # Eye symbol
+        eye_btn.setToolTip(f"Focus on {name}")
+        eye_btn.setFixedSize(28, 28)
+        eye_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        eye_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 14px;
+                font-size: 16px;
+                color: #1976d2;
+            }
+            QPushButton:hover {
+                background-color: #e3f2fd;
+            }
+        """)
+        eye_btn.clicked.connect(lambda: self.canvas.focus_on_actor(name))
+        layout.addWidget(eye_btn)
+        
+        # Apply to list
+        self.links_list.addItem(item)
+        self.links_list.setItemWidget(item, widget)
