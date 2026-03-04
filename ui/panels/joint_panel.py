@@ -469,48 +469,53 @@ class JointPanel(QtWidgets.QWidget):
                 item_layout.addWidget(count_lbl)
 
             # Rename Button
-            rename_btn = QtWidgets.QPushButton("\u270e") # Pencil icon
-            rename_btn.setFixedSize(28, 28)
+            rename_btn = QtWidgets.QPushButton("Aa")
+            rename_btn.setFixedSize(36, 36)
             rename_btn.setCursor(QtCore.Qt.PointingHandCursor)
             rename_btn.setToolTip("Rename joint")
+            rename_btn.setAccessibleName("Rename")
             rename_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: transparent;
-                    color: #1976d2;
-                    border: 1px solid #e3f2fd;
-                    border-radius: 4px;
-                    font-size: 16px;
+                    background-color: white;
+                    color: #757575;
+                    border: 2px solid #e0e0e0;
+                    border-radius: 18px;
+                    font-size: 13px;
+                    font-weight: bold;
                 }
                 QPushButton:hover {
-                    background-color: #1976d2;
-                    color: white;
+                    background-color: white;
+                    color: #1976d2;
+                    border-color: #1976d2;
                 }
             """)
             rename_btn.clicked.connect(lambda checked, n=child_name: self.rename_joint(n))
             item_layout.addWidget(rename_btn)
             
             # Relation/Edit Button
-            # Use a gear icon if relation exists, or pencil-link
-            relation_btn = QtWidgets.QPushButton("\u2699" if is_master else "\ud83d\udd17") 
-            relation_btn.setFixedSize(28, 28)
+            rel_text = "R" if is_master else "+R"
+            relation_btn = QtWidgets.QPushButton(rel_text) 
+            relation_btn.setFixedSize(36, 36)
             relation_btn.setCursor(QtCore.Qt.PointingHandCursor)
-            relation_btn.setToolTip("Edit Relation Feature" if is_master else "Add Joint Relation")
+            relation_btn.setToolTip("Edit Relation" if is_master else "Add Relation")
+            relation_btn.setAccessibleName("Joint Relation")
             
             # Style differently if master
-            rel_color = "#9c27b0" if is_master else "#4caf50" # Purple for edit, Green for add
-            rel_bg = "#f3e5f5" if is_master else "#e8f5e9"
+            rel_color = "#9c27b0" if is_master else "#4caf50"
             
             relation_btn.setStyleSheet(f"""
                 QPushButton {{
-                    background-color: transparent;
-                    color: {rel_color};
-                    border: 1px solid {rel_bg};
-                    border-radius: 4px;
-                    font-size: 18px;
+                    background-color: white;
+                    color: #757575;
+                    border: 2px solid #e0e0e0;
+                    border-radius: 18px;
+                    font-size: 12px;
+                    font-weight: bold;
                 }}
                 QPushButton:hover {{
-                    background-color: {rel_color};
-                    color: white;
+                    background-color: white;
+                    color: {rel_color};
+                    border-color: {rel_color};
                 }}
             """)
             relation_btn.clicked.connect(lambda checked, n=child_name: self.add_joint_relation_ui(n))
@@ -524,25 +529,24 @@ class JointPanel(QtWidgets.QWidget):
             info.setStyleSheet("color: #757575; font-size: 11px; margin-right: 5px;")
             item_layout.addWidget(info)
             
-            # Delete Button
-            del_btn = QtWidgets.QPushButton("✕")
-            del_btn.setFixedSize(32, 32)
+            # Delete Button — red X with circular red border
+            del_btn = QtWidgets.QPushButton("X")
+            del_btn.setFixedSize(36, 36)
             del_btn.setCursor(QtCore.Qt.PointingHandCursor)
             del_btn.setAccessibleName("Remove")
             del_btn.setToolTip("Remove joint")
             del_btn.setStyleSheet("""
                 QPushButton {
-                    background-color: transparent;
-                    color: #9e9e9e;
-                    border: 1px solid #e0e0e0;
-                    border-radius: 16px;
+                    background-color: white;
+                    color: #d32f2f;
+                    border: 2px solid #d32f2f;
+                    border-radius: 18px;
                     font-weight: bold;
-                    font-size: 18px;
+                    font-size: 14px;
                 }
                 QPushButton:hover {
                     background-color: #d32f2f;
                     color: white;
-                    border: 1px solid #d32f2f;
                 }
             """)
             del_btn.clicked.connect(lambda checked, name=child_name: self.delete_joint(name))
@@ -588,6 +592,7 @@ class JointPanel(QtWidgets.QWidget):
         self.mw.robot.update_kinematics()
         self.mw.canvas.update_transforms(self.mw.robot)
         self.mw.log(f"Joint deleted successfully.")
+        self.mw.show_toast(f"Joint removed", "error")
 
     def rename_joint(self, child_name):
         """Open a dialog to rename the joint and update internal IDs."""
@@ -628,6 +633,7 @@ class JointPanel(QtWidgets.QWidget):
 
             self.refresh_joints_history()
             self.mw.log(f"Joint renamed to: {new_custom_name}")
+            self.mw.show_toast(f"Renamed to {new_custom_name}", "success")
 
     def add_joint_relation_ui(self, master_child_name):
         """UI to add a relation between joints"""
@@ -1119,6 +1125,8 @@ class JointPanel(QtWidgets.QWidget):
         # Refresh Matrices Panel Sliders
         if hasattr(self.mw, 'matrices_tab'):
             self.mw.matrices_tab.refresh_sliders()
+        
+        self.mw.show_toast(f"Joint '{custom_name}' created", "success")
 
     def on_joint_control_changed(self, value):
         """Handle joint control slider changes"""

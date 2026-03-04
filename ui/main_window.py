@@ -55,7 +55,8 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         top_bar.setStyleSheet("background-color: white; border-bottom: 1px solid #e0e0e0;")
         top_bar.setFixedHeight(55)
         top_layout = QtWidgets.QHBoxLayout(top_bar)
-        top_layout.setContentsMargins(10, 5, 10, 5)
+        top_layout.setContentsMargins(15, 5, 15, 5)
+        top_layout.setSpacing(10)
         
         # --- Logo / Title ---
         logo_label = QtWidgets.QLabel("ToRoTRoN")
@@ -78,30 +79,48 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
                 background-color: white;
                 border: 1px solid #e0e0e0;
                 border-radius: 5px;
-                padding: 5px;
+                padding: 8px;
                 color: #212121;
+                font-size: 13px;
             }
         """)
         top_layout.addWidget(self.port_combo)
         
         self.connect_btn = QtWidgets.QPushButton("Connect")
-        self.connect_btn.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold; border-radius: 6px; padding: 8px 15px;")
+        self.connect_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.connect_btn.setStyleSheet("background-color: #d32f2f; color: white; font-weight: bold; border-radius: 6px; padding: 8px 18px; font-size: 13px;")
         self.connect_btn.clicked.connect(self.toggle_connection)
         top_layout.addWidget(self.connect_btn)
         
-        refresh_btn = QtWidgets.QPushButton("↻")
-        refresh_btn.setFixedSize(30, 30)
-        refresh_btn.setStyleSheet("border-radius: 15px; font-size: 16px;")
+        refresh_btn = QtWidgets.QPushButton()
+        refresh_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_BrowserReload))
+        refresh_btn.setFixedSize(36, 36)
+        refresh_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        refresh_btn.setToolTip("Refresh serial ports")
+        refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                border: 2px solid #e0e0e0;
+                border-radius: 18px;
+            }
+            QPushButton:hover {
+                border-color: #1976d2;
+            }
+        """)
         refresh_btn.clicked.connect(self.refresh_ports)
         top_layout.addWidget(refresh_btn)
         
         top_layout.addSpacing(15)
         
         self.save_btn = QtWidgets.QPushButton("Save")
+        self.save_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.save_btn.setStyleSheet("font-size: 13px; padding: 8px 18px;")
         self.save_btn.clicked.connect(self.save_project)
         top_layout.addWidget(self.save_btn)
         
         self.load_btn = QtWidgets.QPushButton("Open")
+        self.load_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.load_btn.setStyleSheet("font-size: 13px; padding: 8px 18px;")
         self.load_btn.clicked.connect(self.load_project)
         top_layout.addWidget(self.load_btn)
         
@@ -232,23 +251,21 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         
         # Add a floating Isometric View button directly to the canvas
         # We use a white circular button with a 'Home' icon
-        self.iso_btn = QtWidgets.QPushButton("⌂", self.canvas)
+        self.iso_btn = QtWidgets.QPushButton(self.canvas)
+        self.iso_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_ComputerIcon))
         self.iso_btn.setToolTip("Reset to Isometric View")
         self.iso_btn.setFixedSize(38, 38)
         self.iso_btn.setCursor(QtCore.Qt.PointingHandCursor)
         self.iso_btn.setStyleSheet("""
             QPushButton {
                 background-color: white;
-                color: #1976d2;
                 border: 2px solid #e0e0e0;
                 border-radius: 19px;
-                font-size: 24px;
-                font-weight: bold;
+                padding: 6px;
             }
             QPushButton:hover {
                 background-color: #f5f5f5;
                 border-color: #1976d2;
-                color: #1565c0;
             }
             QPushButton:pressed {
                 background-color: #e3f2fd;
@@ -319,25 +336,6 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         self.terminal_btn.clicked.connect(self.toggle_terminal)
         
         # Add components to main horizontal splitter
-        self.gen_code_btn = QtWidgets.QPushButton("Generate ESP32 Code")
-        self.gen_code_btn.setToolTip("Auto-generate Arduino code for all joints")
-        self.gen_code_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #1976d2;
-                color: white;
-                font-weight: bold;
-                padding: 12px;
-                font-size: 14px;
-                border: none;
-                border-radius: 8px;
-                margin: 5px;
-            }
-            QPushButton:hover {
-                background-color: #1565c0;
-            }
-        """)
-        self.gen_code_btn.clicked.connect(self.on_generate_code)
-        left_layout.addWidget(self.gen_code_btn)
 
         # --- UNIVERSAL SPEED CONTROL ---
         speed_container = QtWidgets.QWidget()
