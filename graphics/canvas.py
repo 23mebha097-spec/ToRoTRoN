@@ -612,10 +612,27 @@ class RobotCanvas(QtWidgets.QWidget):
                 if clicked_name in robot.links:
                     link = robot.links[clicked_name]
                     if link.parent_joint:
-                        self.mw_log(f"\u26a0 Locked: '{clicked_name}' is aligned/jointed. Unjoint reset transform to move freely.")
+                        self.mw_log(f"\u26a0 Locked: '{clicked_name}' is aligned/jointed. Unjoint/reset transform to move freely.")
                         self.select_actor(clicked_name) # Select it visually
                         self.plotter.interactor.GetInteractorStyle().OnLeftButtonDown() # Allow camera rotate
                         return
+            
+            # --- ALIGNMENT MODE LOCK ---
+            # If a component is currently being used for alignment (face picked), 
+            # it should NOT be moved, otherwise the world-coords of the face become invalid.
+            if hasattr(self.window(), 'align_tab') and clicked_name:
+                at = self.window().align_tab
+                staged = []
+                if hasattr(at, 'parent_pick_data') and at.parent_pick_data: 
+                    staged.append(at.parent_pick_data['name'])
+                if hasattr(at, 'child_pick_data') and at.child_pick_data: 
+                    staged.append(at.child_pick_data['name'])
+                
+                if clicked_name in staged:
+                    self.mw_log(f"\u26a0 Locked: '{clicked_name}' has an active alignment selection. Reset or Save to move.")
+                    self.select_actor(clicked_name)
+                    self.plotter.interactor.GetInteractorStyle().OnLeftButtonDown()
+                    return
 
             # CHECK: Is this the Base Link? (Bases are fixed/non-pickable for dragging)
             if clicked_name in self.fixed_actors:
@@ -731,7 +748,7 @@ class RobotCanvas(QtWidgets.QWidget):
             self.cell_picker.Pick(curr_pos[0], curr_pos[1], 0, self.plotter.renderer)
             picked_actor = self.cell_picker.GetActor()
             
-            if picked_actor and picked_actor in self.actors.values():
+            if picked_actor and (picked_actor in self.actors.values() or picked_actor in self.grids.values()):
                 # We store the point but we DON'T move the camera yet 
                 # to avoid jumpy "sliding" views while simply hovering.
                 self._current_hover_pt = np.array(self.cell_picker.GetPickPosition())
@@ -765,12 +782,12 @@ class RobotCanvas(QtWidgets.QWidget):
         picked_actor = self.cell_picker.GetActor()
         
         # Determine the pivot point for the zoom
-        if picked_actor and picked_actor in self.actors.values():
+        # Priority: Exact actor under cursor > Exact grid under cursor > Last known hover pt > Focal point
+        if picked_actor and (picked_actor in self.actors.values() or picked_actor in self.grids.values()):
             P = np.array(self.cell_picker.GetPickPosition())
         elif hasattr(self, '_current_hover_pt') and self._current_hover_pt is not None:
             P = self._current_hover_pt
         else:
-            # Fallback: Zoom towards current focal point if nothing is under mouse
             P = np.array(self.plotter.camera.focal_point)
 
         C = np.array(self.plotter.camera.position)
@@ -857,19 +874,19 @@ class RobotCanvas(QtWidgets.QWidget):
         xy_mesh = pv.Plane(center=(0, 0, 0), direction=(0, 0, 1), i_size=size, j_size=size, i_resolution=res, j_resolution=res)
         self.grids['xy'] = self.plotter.add_mesh(xy_mesh, color="#e3f2fd", opacity=0.3, 
                                                show_edges=True, edge_color="#1565c0", line_width=1,
-                                               name="grid_xy", pickable=False, lighting=False)
+                                               name="grid_xy", pickable=True, lighting=False)
         
         # 2. XZ Grid (Front/Back) - Greenish tint
         xz_mesh = pv.Plane(center=(0, 0, 0), direction=(0, 1, 0), i_size=size, j_size=size, i_resolution=res, j_resolution=res)
         self.grids['xz'] = self.plotter.add_mesh(xz_mesh, color="#e8f5e9", opacity=0.3, 
                                                show_edges=True, edge_color="#2e7d32", line_width=1,
-                                               name="grid_xz", pickable=False, lighting=False)
+                                               name="grid_xz", pickable=True, lighting=False)
         
         # 3. YZ Grid (Left/Right) - Reddish tint
         yz_mesh = pv.Plane(center=(0, 0, 0), direction=(1, 0, 0), i_size=size, j_size=size, i_resolution=res, j_resolution=res)
         self.grids['yz'] = self.plotter.add_mesh(yz_mesh, color="#ffebee", opacity=0.3, 
                                                show_edges=True, edge_color="#c62828", line_width=1,
-                                               name="grid_yz", pickable=False, lighting=False)
+                                               name="grid_yz", pickable=True, lighting=False)
         
         # Initially hide all except XY
         for name, actor in self.grids.items():

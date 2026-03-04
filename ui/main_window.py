@@ -218,6 +218,9 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         
         left_layout.addWidget(panel_scroll, 1)
         
+        # Connect tab change handler for feature switching (like disabling drag)
+        self.panel_stack.currentChanged.connect(self.on_tab_changed)
+        
         # Refresh ports on launch
         self.refresh_ports()
         

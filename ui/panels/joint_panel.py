@@ -115,6 +115,11 @@ class JointPanel(QtWidgets.QWidget):
         self.axis_group.addButton(self.axis_z_radio, 2)
         axis_buttons_row.addWidget(self.axis_z_radio)
         
+        # Connect axis change to live visuals
+        self.axis_x_radio.toggled.connect(lambda: self.show_joint_arrow() if self.axis_x_radio.isChecked() else None)
+        self.axis_y_radio.toggled.connect(lambda: self.show_joint_arrow() if self.axis_y_radio.isChecked() else None)
+        self.axis_z_radio.toggled.connect(lambda: self.show_joint_arrow() if self.axis_z_radio.isChecked() else None)
+        
         rot_layout.addLayout(axis_buttons_row)
         
         # Rotation limits
@@ -428,6 +433,27 @@ class JointPanel(QtWidgets.QWidget):
             label = QtWidgets.QLabel(display_name)
             label.setStyleSheet("color: #212121; font-size: 13px; font-weight: bold;")
             item_layout.addWidget(label)
+
+            # Rename Button
+            rename_btn = QtWidgets.QPushButton("\u270e") # Pencil icon
+            rename_btn.setFixedSize(28, 28)
+            rename_btn.setCursor(QtCore.Qt.PointingHandCursor)
+            rename_btn.setToolTip("Rename joint")
+            rename_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    color: #1976d2;
+                    border: 1px solid #e3f2fd;
+                    border-radius: 4px;
+                    font-size: 16px;
+                }
+                QPushButton:hover {
+                    background-color: #1976d2;
+                    color: white;
+                }
+            """)
+            rename_btn.clicked.connect(lambda checked, n=child_name: self.rename_joint(n))
+            item_layout.addWidget(rename_btn)
             
             item_layout.addStretch()
             
@@ -501,6 +527,46 @@ class JointPanel(QtWidgets.QWidget):
         self.mw.robot.update_kinematics()
         self.mw.canvas.update_transforms(self.mw.robot)
         self.mw.log(f"Joint deleted successfully.")
+
+    def rename_joint(self, child_name):
+        """Open a dialog to rename the joint and update internal IDs."""
+        if child_name not in self.joints:
+            return
+            
+        data = self.joints[child_name]
+        old_custom_name = data.get('custom_name', child_name)
+        old_id = data.get('joint_id', old_custom_name)
+        
+        new_name, ok = QtWidgets.QInputDialog.getText(
+            self, "Rename Joint", 
+            f"Enter new name for '{old_custom_name}':", 
+            text=old_custom_name
+        )
+        
+        if ok and new_name.strip():
+            new_custom_name = new_name.strip()
+            # Generate sanitized ID for code compatibility
+            new_id = new_custom_name.replace(" ", "_").replace("/", "_")
+            
+            # 1. Update Robot Core dictionary if ID changed
+            if new_id != old_id and old_id in self.mw.robot.joints:
+                joint_obj = self.mw.robot.joints.pop(old_id)
+                joint_obj.name = new_id
+                self.mw.robot.joints[new_id] = joint_obj
+                self.mw.log(f"Robot core joint ID updated: {old_id} -> {new_id}")
+                
+            # 2. Update local UI storage
+            data['custom_name'] = new_custom_name
+            data['joint_id'] = new_id
+            
+            # 3. Update active control if needed
+            if self.active_joint_control == child_name:
+                axis_names = {0: "X", 1: "Y", 2: "Z"}
+                axis_name = axis_names.get(data['axis'], "?")
+                self.joint_info_label.setText(f"Joint: {new_custom_name} | Axis: {axis_name}")
+
+            self.refresh_joints_history()
+            self.mw.log(f"Joint renamed to: {new_custom_name}")
 
     def select_object(self, name):
         """Selection logic for external calls"""
@@ -716,9 +782,6 @@ class JointPanel(QtWidgets.QWidget):
         self.rotation_slider.setValue(slider_value)
         self.rotation_slider.blockSignals(False)
         
-        # Apply rotation
-        self.test_rotation(slider_value)
-
     def test_rotation(self, value):
         """Test rotate the child object based on slider value"""
         if not hasattr(self, 'original_child_transform') or not self.child_object or self.child_object not in self.mw.robot.links:
@@ -727,72 +790,89 @@ class JointPanel(QtWidgets.QWidget):
         # Convert slider value to degrees
         angle_deg = value / 10.0
         angle_rad = np.radians(angle_deg)
+
+        # 1. Get Parent Orientation
+        parent_link = self.mw.robot.links[self.parent_object]
+        R_p = parent_link.t_world[:3, :3]
         
-        # Get selected axis
+        # 2. Get the currently selected axis Choice
         if self.axis_x_radio.isChecked():
-            axis = np.array([1, 0, 0])
+            local_axis = np.array([1, 0, 0])
         elif self.axis_y_radio.isChecked():
-            axis = np.array([0, 1, 0])
+            local_axis = np.array([0, 1, 0])
         else:  # Z
-            axis = np.array([0, 0, 1])
-        
-        # Create rotation matrix around the alignment point
-        # R = T(pivot) * Rot(axis, angle) * T(-pivot)
-        
-        # Rodrigues' rotation formula
+            local_axis = np.array([0, 0, 1])
+            
+        # 3. Transform Local Choice to World Direction
+        axis = R_p @ local_axis
+        axis = axis / (np.linalg.norm(axis) + 1e-9)
+
+        # 4. Standard Rodrigues Formula (R_world)
         K = np.array([
             [0, -axis[2], axis[1]],
             [axis[2], 0, -axis[0]],
             [-axis[1], axis[0], 0]
         ])
-        
         R3x3 = np.eye(3) + np.sin(angle_rad) * K + (1 - np.cos(angle_rad)) * (K @ K)
+        R = np.eye(4); R[:3, :3] = R3x3
         
-        # Create 4x4 rotation matrix
-        R = np.eye(4)
-        R[:3, :3] = R3x3
+        T_to_origin = np.eye(4); T_to_origin[:3, 3] = -self.alignment_point
+        T_from_origin = np.eye(4); T_from_origin[:3, 3] = self.alignment_point
         
-        # Translate to origin, rotate, translate back
-        T_to_origin = np.eye(4)
-        T_to_origin[:3, 3] = -self.alignment_point
-        
-        T_from_origin = np.eye(4)
-        T_from_origin[:3, 3] = self.alignment_point
-        
-        # Apply transformation: T_from * R * T_to * original
+        # Apply transformation
         child_link = self.mw.robot.links[self.child_object]
         child_link.t_world = T_from_origin @ R @ T_to_origin @ self.original_child_transform
         
-        # Update visual
+        # 5. Update visual and guides
         self.mw.canvas.update_transforms(self.mw.robot)
+        self.show_joint_arrow()
 
     def show_joint_arrow(self):
-        """Display a yellow arrow at the joint alignment point"""
+        """Display a small RGB axis triad and a yellow joint direction arrow at the pivot."""
         import pyvista as pv
+        if not self.parent_object or self.alignment_point is None: return
         
-        # Remove any existing arrow
+        # Remove any existing indicators
         self.mw.canvas.plotter.remove_actor("joint_arrow")
+        self.mw.canvas.plotter.remove_actor("joint_triad_x")
+        self.mw.canvas.plotter.remove_actor("joint_triad_y")
+        self.mw.canvas.plotter.remove_actor("joint_triad_z")
         
-        # Create arrow pointing up (Z direction by default) - MUCH SMALLER
-        arrow_length = 0.4  # Reduced from 2.0 to 0.4 (20% of original size)
-        arrow = pv.Arrow(
-            start=self.alignment_point,
-            direction=[0, 0, 1],
-            scale=arrow_length
-        )
+        # 1. Get Parent Orientation
+        parent_link = self.mw.robot.links[self.parent_object]
+        R_p = parent_link.t_world[:3, :3]
         
-        # Add to scene with yellow color
-        self.mw.canvas.plotter.add_mesh(
-            arrow,
-            color="yellow",
-            name="joint_arrow",
-            pickable=False
-        )
+        # 2. Get the currently selected axis Choice
+        if self.axis_x_radio.isChecked():
+            local_axis = np.array([1, 0, 0])
+        elif self.axis_y_radio.isChecked():
+            local_axis = np.array([0, 1, 0])
+        else:  # Z
+            local_axis = np.array([0, 0, 1])
+            
+        # Triangle orientation
+        world_axis = R_p @ local_axis
+        
+        # --- SHOW RGB TRIAD (Local Parent Axes) ---
+        triad_length = 0.5
+        for i, color in enumerate(["red", "green", "blue"]):
+            l_ax = np.zeros(3); l_ax[i] = 1
+            w_ax = R_p @ l_ax
+            line = pv.Line(self.alignment_point, self.alignment_point + w_ax * triad_length)
+            self.mw.canvas.plotter.add_mesh(line, color=color, line_width=4, name=f"joint_triad_{'xyz'[i]}", pickable=False)
+
+        # --- SHOW MAIN JOINT ARROW (Yellow) ---
+        arrow = pv.Arrow(start=self.alignment_point, direction=world_axis, scale=0.8)
+        self.mw.canvas.plotter.add_mesh(arrow, color="yellow", name="joint_arrow", pickable=False)
         self.mw.canvas.plotter.render()
-        self.mw.log("Yellow arrow shown at joint location.")
 
     def confirm_joint(self):
         """Finalize the joint with selected axis and limits"""
+        # Cleanup triad before proceeding
+        self.mw.canvas.plotter.remove_actor("joint_triad_x")
+        self.mw.canvas.plotter.remove_actor("joint_triad_y")
+        self.mw.canvas.plotter.remove_actor("joint_triad_z")
+
         # Get selected axis
         if self.axis_x_radio.isChecked():
             axis = 0  # X
