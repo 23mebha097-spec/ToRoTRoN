@@ -81,6 +81,7 @@ class RobotCanvas(QtWidgets.QWidget):
         self._selection_dim_actors = []
         
         self.interaction_mode = "rotate" # 'rotate'
+        self.picking_focus_point = False  # Focus point picking mode
 
     def _dist_point_to_segment(self, p, a, b):
         """Calculates distance from point p to line segment (a, b)"""
@@ -342,8 +343,10 @@ class RobotCanvas(QtWidgets.QWidget):
         """Standard CAD behavior: Escape or blank click clears everything."""
         self.selected_name = None
         self.picking_face = False
+        self.picking_focus_point = False
         self.clear_highlights()
         self._update_selection_visuals() # Clear dimension lines
+        self.clear_focus_point()
         if self.on_deselect_callback:
             self.on_deselect_callback()
         
@@ -352,14 +355,8 @@ class RobotCanvas(QtWidgets.QWidget):
             actor.GetProperty().SetEdgeColor([0.5, 0.5, 0.5])
         self.plotter.render()
             
-        # Clear alignment highlights if any
-        self.clear_highlights()
-        
-        if self.on_deselect_callback:
-            self.on_deselect_callback()
-            
         self.mw_log("Selection cleared.")
-        self.plotter.render()
+        self.setCursor(QtCore.Qt.ArrowCursor)
 
     def start_face_picking(self, callback, color="orange"):
         """Activates specialized face picking mode."""
@@ -490,6 +487,62 @@ class RobotCanvas(QtWidgets.QWidget):
         self.mw_log("Pick a point in 3D space for the Joint Pivot...")
         self.setCursor(QtCore.Qt.CrossCursor)
 
+    def start_focus_point_picking(self):
+        """Activates focus point picking mode - click any surface to place a marker and zoom in."""
+        self.picking_focus_point = True
+        self.mw_log("Click anywhere on the 3D scene to set a focus point...")
+        self.setCursor(QtCore.Qt.CrossCursor)
+
+    def focus_on_point(self, point):
+        """Place a small sphere marker at the 3D point and focus the camera on it."""
+        point = np.array(point)
+        
+        # Remove previous focus marker if exists
+        self.clear_focus_point()
+        
+        # Calculate adaptive sphere radius based on scene scale
+        radius = 0.005  # default tiny
+        if self.actors:
+            xmin, xmax, ymin, ymax, zmin, zmax = 1e9, -1e9, 1e9, -1e9, 1e9, -1e9
+            for actor in self.actors.values():
+                b = actor.GetBounds()
+                xmin, xmax = min(xmin, b[0]), max(xmax, b[1])
+                ymin, ymax = min(ymin, b[2]), max(ymax, b[3])
+                zmin, zmax = min(zmin, b[4]), max(zmax, b[5])
+            scene_diag = np.sqrt((xmax-xmin)**2 + (ymax-ymin)**2 + (zmax-zmin)**2)
+            radius = scene_diag * 0.02  # 2% of scene diagonal
+        
+        # Create a sphere at the focus point
+        sphere = pv.Sphere(radius=radius, center=point)
+        self.plotter.add_mesh(sphere, color="#1976d2", opacity=0.85,
+                             name="focus_point_sphere", pickable=False)
+        
+        # Focus camera: set focal point and zoom in
+        cam = self.plotter.camera
+        view_up = np.array(cam.GetViewUp())
+        cam_pos = np.array(cam.position)
+        cam_dir = cam_pos - point
+        cam_dist = np.linalg.norm(cam_dir)
+        cam_dir_norm = cam_dir / (cam_dist + 1e-9)
+        
+        zoom_region = radius * 60
+        new_dist = max(zoom_region, cam_dist * 0.15)
+        
+        cam.focal_point = point
+        cam.position = point + cam_dir_norm * new_dist
+        cam.up = view_up
+        
+        self.plotter.render()
+        self._on_camera_change()
+        self.mw_log(f"Focus point set at ({point[0]:.3f}, {point[1]:.3f}, {point[2]:.3f})")
+
+    def clear_focus_point(self):
+        """Remove the focus point marker from the scene."""
+        try:
+            self.plotter.remove_actor("focus_point_sphere")
+        except:
+            pass
+
     def _on_left_down(self, obj, event):
         click_pos = self.plotter.interactor.GetEventPosition()
         
@@ -565,6 +618,21 @@ class RobotCanvas(QtWidgets.QWidget):
             self.setCursor(QtCore.Qt.ArrowCursor)
             self.mw_log(f"Point picked: {np.round(picked_pos, 2)}")
             return # Block other interactions
+
+        # --- FOCUS POINT PICKING MODE ---
+        if self.picking_focus_point:
+            self.cell_picker.Pick(click_pos[0], click_pos[1], 0, self.plotter.renderer)
+            picked_actor = self.cell_picker.GetActor()
+            
+            if picked_actor:
+                picked_pos = self.cell_picker.GetPickPosition()
+                self.focus_on_point(picked_pos)
+            else:
+                self.mw_log("No surface under cursor - click on a model or grid.")
+            
+            self.picking_focus_point = False
+            self.setCursor(QtCore.Qt.ArrowCursor)
+            return
 
         # CASE 0: FACE PICKING IN PROGRESS
         if self.picking_face:
@@ -1005,7 +1073,7 @@ class RobotCanvas(QtWidgets.QWidget):
         
         # Initially hide all except XY
         for name, actor in self.grids.items():
-            actor.SetVisibility(name == 'xy')
+            actor.SetVisibility(bool(name == 'xy'))
 
     def _init_axis_labels(self):
         """Creates distance labels along the center axis lines (through origin)."""
@@ -1058,7 +1126,7 @@ class RobotCanvas(QtWidgets.QWidget):
         # Initially show only XY center lines
         for gk, actors in self._center_axis_actors.items():
             for a in actors:
-                a.SetVisibility(gk == 'xy')
+                a.SetVisibility(bool(gk == 'xy'))
         
         # ── DISTANCE LABELS along center axes ──
         # Labels placed ON the axis lines with a small perpendicular offset
@@ -1104,7 +1172,7 @@ class RobotCanvas(QtWidgets.QWidget):
         
         # Initially show only XY labels
         for lbl in self._axis_labels:
-            lbl['actor'].SetVisibility(lbl['grid'] == 'xy')
+            lbl['actor'].SetVisibility(bool(lbl['grid'] == 'xy'))
 
     def update_grid_scale(self, units_per_cm):
         """Updates the graph labeling scale to match robot units (e.g., 10.0 for mm)."""
@@ -1178,15 +1246,15 @@ class RobotCanvas(QtWidgets.QWidget):
         # Update center axis lines visibility
         if hasattr(self, '_center_axis_actors'):
             for gk, actors in self._center_axis_actors.items():
-                vis = grid_vis.get(gk, False)
+                vis = bool(grid_vis.get(gk, False))
                 for a in actors:
                     a.SetVisibility(vis)
         
         # Update label visibility
         for lbl in self._axis_labels:
-            gv = grid_vis.get(lbl['grid'], False)
+            gv = bool(grid_vis.get(lbl['grid'], False))
             tv = (abs(lbl['val']) % spacing) == 0 if spacing > 1 else True
-            lbl['actor'].SetVisibility(gv and tv)
+            lbl['actor'].SetVisibility(bool(gv and tv))
 
     def _on_camera_change(self, *args):
         """Dynamically toggles grid visibility based on camera orientation."""
@@ -1221,13 +1289,13 @@ class RobotCanvas(QtWidgets.QWidget):
             self.grids['xz'].SetVisibility(False)
             self.grids['yz'].SetVisibility(False)
         else:
-            self.grids['xy'].SetVisibility(show_xy)
+            self.grids['xy'].SetVisibility(bool(show_xy))
             self.grids['xy'].GetProperty().SetOpacity(0.5 if show_xy else 0.3)
             
-            self.grids['xz'].SetVisibility(show_xz)
+            self.grids['xz'].SetVisibility(bool(show_xz))
             self.grids['xz'].GetProperty().SetOpacity(0.5 if show_xz else 0.3)
             
-            self.grids['yz'].SetVisibility(show_yz)
+            self.grids['yz'].SetVisibility(bool(show_yz))
             self.grids['yz'].GetProperty().SetOpacity(0.5 if show_yz else 0.3)
         
         # Update axis labels based on zoom and grid visibility

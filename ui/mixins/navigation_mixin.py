@@ -176,9 +176,9 @@ class NavigationMixin:
             self.save_btn.setEnabled(False)
             self.load_btn.setEnabled(False)
             
-            # Show Import Object button and Simulation Panel
+            # Show Import Object button and Simulation Toggle
             self.import_obj_btn.setVisible(True)
-            self.sim_objects_panel.setVisible(True)
+            self.sim_toggle_icon.setVisible(True)
             self.refresh_sim_objects_list()
             
         else:
@@ -197,6 +197,7 @@ class NavigationMixin:
             
             # Hide Import Object button and Simulation Panel
             self.import_obj_btn.setVisible(False)
+            self.sim_toggle_icon.setVisible(False)
             self.sim_objects_panel.setVisible(False)
             
             # Remove any speed overlay from canvas

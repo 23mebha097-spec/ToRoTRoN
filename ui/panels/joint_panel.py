@@ -425,7 +425,7 @@ class JointPanel(QtWidgets.QWidget):
             # Create custom widget for the item
             widget = QtWidgets.QWidget()
             item_layout = QtWidgets.QHBoxLayout(widget)
-            item_layout.setContentsMargins(10, 8, 10, 8)
+            item_layout.setContentsMargins(12, 10, 12, 10)
             item_layout.setSpacing(10)
             
             # Label: Custom Name Only
@@ -447,7 +447,7 @@ class JointPanel(QtWidgets.QWidget):
                 r_badge = QtWidgets.QLabel("R")
                 r_badge.setToolTip("Joint Relation Active")
                 r_badge.setAlignment(QtCore.Qt.AlignCenter)
-                r_badge.setFixedSize(22, 22)
+                r_badge.setFixedSize(26, 26)
                 r_badge.setStyleSheet("""
                     background-color: #673ab7;
                     color: white;
@@ -458,7 +458,7 @@ class JointPanel(QtWidgets.QWidget):
                 item_layout.addWidget(r_badge)
 
             label = QtWidgets.QLabel(display_name)
-            label.setStyleSheet("color: #212121; font-size: 13px; font-weight: bold;")
+            label.setStyleSheet("color: #212121; font-size: 15px; font-weight: bold;")
             item_layout.addWidget(label)
 
             # --- Master Only Icons ---
@@ -470,7 +470,7 @@ class JointPanel(QtWidgets.QWidget):
 
             # Rename Button
             rename_btn = QtWidgets.QPushButton("Aa")
-            rename_btn.setFixedSize(36, 36)
+            rename_btn.setFixedSize(40, 40)
             rename_btn.setCursor(QtCore.Qt.PointingHandCursor)
             rename_btn.setToolTip("Rename joint")
             rename_btn.setAccessibleName("Rename")
@@ -479,8 +479,8 @@ class JointPanel(QtWidgets.QWidget):
                     background-color: white;
                     color: #757575;
                     border: 2px solid #e0e0e0;
-                    border-radius: 18px;
-                    font-size: 13px;
+                    border-radius: 20px;
+                    font-size: 14px;
                     font-weight: bold;
                 }
                 QPushButton:hover {
@@ -495,7 +495,7 @@ class JointPanel(QtWidgets.QWidget):
             # Relation/Edit Button
             rel_text = "R" if is_master else "+R"
             relation_btn = QtWidgets.QPushButton(rel_text) 
-            relation_btn.setFixedSize(36, 36)
+            relation_btn.setFixedSize(40, 40)
             relation_btn.setCursor(QtCore.Qt.PointingHandCursor)
             relation_btn.setToolTip("Edit Relation" if is_master else "Add Relation")
             relation_btn.setAccessibleName("Joint Relation")
@@ -508,8 +508,8 @@ class JointPanel(QtWidgets.QWidget):
                     background-color: white;
                     color: #757575;
                     border: 2px solid #e0e0e0;
-                    border-radius: 18px;
-                    font-size: 12px;
+                    border-radius: 20px;
+                    font-size: 13px;
                     font-weight: bold;
                 }}
                 QPushButton:hover {{
@@ -526,12 +526,12 @@ class JointPanel(QtWidgets.QWidget):
             # Axis/Limits info small
             axis_names = {0: "X", 1: "Y", 2: "Z"}
             info = QtWidgets.QLabel(f"Axis: {axis_names[data['axis']]}")
-            info.setStyleSheet("color: #757575; font-size: 11px; margin-right: 5px;")
+            info.setStyleSheet("color: #757575; font-size: 13px; font-weight: bold; margin-right: 5px;")
             item_layout.addWidget(info)
             
             # Delete Button — red X with circular red border
             del_btn = QtWidgets.QPushButton("X")
-            del_btn.setFixedSize(36, 36)
+            del_btn.setFixedSize(40, 40)
             del_btn.setCursor(QtCore.Qt.PointingHandCursor)
             del_btn.setAccessibleName("Remove")
             del_btn.setToolTip("Remove joint")
@@ -540,7 +540,7 @@ class JointPanel(QtWidgets.QWidget):
                     background-color: white;
                     color: #d32f2f;
                     border: 2px solid #d32f2f;
-                    border-radius: 18px;
+                    border-radius: 20px;
                     font-weight: bold;
                     font-size: 14px;
                 }
@@ -552,7 +552,7 @@ class JointPanel(QtWidgets.QWidget):
             del_btn.clicked.connect(lambda checked, name=child_name: self.delete_joint(name))
             item_layout.addWidget(del_btn)
             
-            item.setSizeHint(widget.sizeHint())
+            item.setSizeHint(QtCore.QSize(0, 60))
             self.joints_history_list.setItemWidget(item, widget)
 
     def delete_joint(self, child_name):

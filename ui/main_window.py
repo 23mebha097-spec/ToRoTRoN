@@ -273,6 +273,29 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         """)
         self.iso_btn.clicked.connect(lambda: self.canvas.view_isometric())
         
+        # --- Focus Point Button (next to isometric) ---
+        self.focus_btn = QtWidgets.QPushButton(self.canvas)
+        self.focus_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_DialogApplyButton))
+        self.focus_btn.setToolTip("Set Focus Point - click a surface to zoom in")
+        self.focus_btn.setFixedSize(38, 38)
+        self.focus_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.focus_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                border: 2px solid #e0e0e0;
+                border-radius: 19px;
+                padding: 6px;
+            }
+            QPushButton:hover {
+                background-color: #f5f5f5;
+                border-color: #1976d2;
+            }
+            QPushButton:pressed {
+                background-color: #e3f2fd;
+            }
+        """)
+        self.focus_btn.clicked.connect(lambda: self.canvas.start_focus_point_picking())
+        
         # --- Floating Import Object Button (upper-left of canvas) ---
         self.import_obj_btn = QtWidgets.QPushButton("📦 Import Object", self.canvas)
         self.import_obj_btn.setToolTip("Import STL / STEP / OBJ files into the 3D scene")
@@ -300,43 +323,126 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         self.import_obj_btn.clicked.connect(self.import_mesh)
         self.import_obj_btn.setVisible(False)  # Only visible in Simulation Mode
         
-        # --- Simulation Objects List Panel (bottom-right of canvas) ---
-        self.sim_objects_panel = QtWidgets.QWidget(self.canvas)
-        self.sim_objects_panel.setFixedSize(240, 300)
-        self.sim_objects_panel.setStyleSheet("""
-            QWidget {
-                background-color: rgba(255, 255, 255, 230);
-                border: 2px solid #1976d2;
-                border-radius: 10px;
+        # --- Simulation Objects Toggle Button (bottom-right of canvas) ---
+        self.sim_toggle_icon = QtWidgets.QPushButton(self.canvas)
+        self.sim_toggle_icon.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_FileDialogListView))
+        self.sim_toggle_icon.setIconSize(QtCore.QSize(22, 22))
+        self.sim_toggle_icon.setToolTip("Simulation Objects")
+        self.sim_toggle_icon.setFixedSize(44, 44)
+        self.sim_toggle_icon.setCursor(QtCore.Qt.PointingHandCursor)
+        self.sim_toggle_icon.setStyleSheet("""
+            QPushButton {
+                background-color: #1976d2;
+                border: none;
+                border-radius: 22px;
+                padding: 8px;
+            }
+            QPushButton:hover {
+                background-color: #1565c0;
+            }
+            QPushButton:pressed {
+                background-color: #0d47a1;
             }
         """)
-        sim_panel_layout = QtWidgets.QVBoxLayout(self.sim_objects_panel)
-        sim_panel_layout.setContentsMargins(5, 5, 5, 5)
-        sim_panel_layout.setSpacing(2)
+        self.sim_toggle_icon.setVisible(False)
+        self.sim_toggle_icon.clicked.connect(self._toggle_sim_panel)
         
-        sim_header = QtWidgets.QLabel("📦 Simulation Objects")
-        sim_header.setStyleSheet("color: #1976d2; font-weight: bold; font-size: 13px; border: none; background: transparent;")
-        sim_header.setAlignment(QtCore.Qt.AlignCenter)
-        sim_panel_layout.addWidget(sim_header)
+        # --- Simulation Objects Popup Panel ---
+        self.sim_objects_panel = QtWidgets.QWidget(self.canvas)
+        self.sim_objects_panel.setFixedSize(280, 380)
+        self.sim_objects_panel.setStyleSheet("""
+            QWidget#sim_panel_root {
+                background-color: white;
+                border: 1px solid #e0e0e0;
+                border-radius: 12px;
+            }
+        """)
+        self.sim_objects_panel.setObjectName("sim_panel_root")
+        
+        sim_panel_layout = QtWidgets.QVBoxLayout(self.sim_objects_panel)
+        sim_panel_layout.setContentsMargins(0, 0, 0, 8)
+        sim_panel_layout.setSpacing(0)
+        
+        # Dark header bar
+        sim_header_bar = QtWidgets.QWidget()
+        sim_header_bar.setStyleSheet("""
+            QWidget {
+                background-color: #1976d2;
+                border-top-left-radius: 12px;
+                border-top-right-radius: 12px;
+            }
+        """)
+        sim_header_layout = QtWidgets.QHBoxLayout(sim_header_bar)
+        sim_header_layout.setContentsMargins(12, 8, 8, 8)
+        
+        sim_icon_label = QtWidgets.QLabel("SIM")
+        sim_icon_label.setStyleSheet("color: white; font-weight: bold; font-size: 11px; background: rgba(255,255,255,0.2); border-radius: 4px; padding: 2px 6px;")
+        sim_header_layout.addWidget(sim_icon_label)
+        
+        sim_title = QtWidgets.QLabel("Simulation Objects")
+        sim_title.setStyleSheet("color: white; font-weight: bold; font-size: 14px; background: transparent;")
+        sim_header_layout.addWidget(sim_title)
+        sim_header_layout.addStretch()
+        
+        sim_close_btn = QtWidgets.QPushButton("X")
+        sim_close_btn.setFixedSize(28, 28)
+        sim_close_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        sim_close_btn.setStyleSheet("""
+            QPushButton {
+                background: rgba(255,255,255,0.2);
+                color: white;
+                border: none;
+                border-radius: 14px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background: rgba(255,255,255,0.4);
+            }
+        """)
+        sim_close_btn.clicked.connect(self._toggle_sim_panel)
+        sim_header_layout.addWidget(sim_close_btn)
+        sim_panel_layout.addWidget(sim_header_bar)
+        
+        # List area with padding
+        list_container = QtWidgets.QWidget()
+        list_container.setStyleSheet("background: transparent;")
+        list_layout = QtWidgets.QVBoxLayout(list_container)
+        list_layout.setContentsMargins(10, 10, 10, 6)
+        list_layout.setSpacing(6)
         
         self.sim_objects_list = QtWidgets.QListWidget()
         self.sim_objects_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid #e0e0e0;
-                border-radius: 5px;
-                background: white;
+                border-radius: 8px;
+                background: #fafafa;
                 color: #424242;
-                font-size: 12px;
+                font-size: 14px;
             }
-            QListWidget::item { padding: 5px; }
+            QListWidget::item { padding: 8px 10px; }
             QListWidget::item:selected { background-color: #e3f2fd; color: #1976d2; }
+            QListWidget::item:hover { background-color: #f5f5f5; }
         """)
         self.sim_objects_list.itemClicked.connect(self.on_sim_object_clicked)
-        sim_panel_layout.addWidget(self.sim_objects_list)
+        list_layout.addWidget(self.sim_objects_list)
+        sim_panel_layout.addWidget(list_container)
         
-        # --- COORDINATE GRID (2 ROWS, 4 COLUMNS) ---
+        # --- COORDINATE GRID ---
+        coord_container = QtWidgets.QWidget()
+        coord_container.setStyleSheet("background: transparent;")
+        coord_layout = QtWidgets.QVBoxLayout(coord_container)
+        coord_layout.setContentsMargins(10, 0, 10, 4)
+        coord_layout.setSpacing(4)
+        
+        # Separator
+        sep = QtWidgets.QFrame()
+        sep.setFrameShape(QtWidgets.QFrame.HLine)
+        sep.setStyleSheet("color: #e0e0e0;")
+        coord_layout.addWidget(sep)
+        
         self.points_grid = QtWidgets.QGridLayout()
-        self.points_grid.setContentsMargins(2, 5, 2, 2)
+        self.points_grid.setContentsMargins(0, 4, 0, 0)
         self.points_grid.setSpacing(4)
         
         def create_coord_sb(color):
@@ -344,15 +450,29 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
             sb.setRange(-9999, 9999)
             sb.setDecimals(1)
             sb.setSuffix(" cm")
-            sb.setFixedWidth(75)
-            sb.setStyleSheet(f"QDoubleSpinBox {{ background: white; color: {color}; border: 1px solid #ddd; font-size: 11px; padding: 1px; font-weight: bold; }}")
+            sb.setFixedWidth(78)
+            sb.setFixedHeight(28)
+            sb.setStyleSheet(f"""
+                QDoubleSpinBox {{
+                    background: #fafafa;
+                    color: {color};
+                    border: 1px solid #e0e0e0;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    padding: 2px 4px;
+                    font-weight: bold;
+                }}
+                QDoubleSpinBox:focus {{
+                    border-color: {color};
+                }}
+            """)
             sb.valueChanged.connect(self.save_sim_object_coords)
             return sb
 
         # Row 1: Pick
-        pick_label = QtWidgets.QLabel("P1") # Pick
+        pick_label = QtWidgets.QLabel("P1")
         pick_label.setToolTip("Pick Coordinates (cm)")
-        pick_label.setStyleSheet("font-weight: bold; color: #1976d2; border: none; background: transparent; font-size: 11px;")
+        pick_label.setStyleSheet("font-weight: bold; color: #1976d2; border: none; background: transparent; font-size: 12px;")
         self.pick_x = create_coord_sb("#1976d2")
         self.pick_y = create_coord_sb("#1976d2")
         self.pick_z = create_coord_sb("#1976d2")
@@ -363,9 +483,9 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         self.points_grid.addWidget(self.pick_z, 0, 3)
         
         # Row 2: Place
-        place_label = QtWidgets.QLabel("P2") # Place/Offset
+        place_label = QtWidgets.QLabel("P2")
         place_label.setToolTip("Place/Offset Coordinates (cm)")
-        place_label.setStyleSheet("font-weight: bold; color: #388E3C; border: none; background: transparent; font-size: 11px;")
+        place_label.setStyleSheet("font-weight: bold; color: #388E3C; border: none; background: transparent; font-size: 12px;")
         self.place_x = create_coord_sb("#388E3C")
         self.place_y = create_coord_sb("#388E3C")
         self.place_z = create_coord_sb("#388E3C")
@@ -376,9 +496,9 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         self.points_grid.addWidget(self.place_z, 1, 3)
         
         # Row 3: Live Point
-        live_label = QtWidgets.QLabel("LP") # Live Point
+        live_label = QtWidgets.QLabel("LP")
         live_label.setToolTip("End Effector Live Position (cm)")
-        live_label.setStyleSheet("font-weight: bold; color: #D32F2F; border: none; background: transparent; font-size: 11px;")
+        live_label.setStyleSheet("font-weight: bold; color: #D32F2F; border: none; background: transparent; font-size: 12px;")
         
         self.live_x = create_coord_sb("#D32F2F")
         self.live_y = create_coord_sb("#D32F2F")
@@ -394,23 +514,29 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         self.points_grid.addWidget(self.live_y, 2, 2)
         self.points_grid.addWidget(self.live_z, 2, 3)
         
-        sim_panel_layout.addLayout(self.points_grid)
+        coord_layout.addLayout(self.points_grid)
+        sim_panel_layout.addWidget(coord_container)
         
-        self.sim_objects_panel.setVisible(False) # Hidden by default
+        self.sim_objects_panel.setVisible(False)  # Hidden by default
         
         # Initial positions
         self.iso_btn.move(self.canvas.width() - 160, 24)
+        self.focus_btn.move(self.canvas.width() - 160, 68)
         self.import_obj_btn.move(12, 12)
-        self.sim_objects_panel.move(self.canvas.width() - 252, self.canvas.height() - 312)
+        self.sim_toggle_icon.move(self.canvas.width() - 56, self.canvas.height() - 56)
+        self.sim_objects_panel.move(self.canvas.width() - 292, self.canvas.height() - 444)
         
         # Proper way to handle repositioning on resize
         original_resize = self.canvas.resizeEvent
         def patched_resize(event):
             original_resize(event) # Call existing logic
-            # Keep Home pinned to the top-right
+            # Keep buttons pinned to top-right, stacked vertically
             self.iso_btn.move(self.canvas.width() - 160, 24)
-            # Pin Simulation Objects panel to bottom-right
-            self.sim_objects_panel.move(self.canvas.width() - 252, self.canvas.height() - 312)
+            self.focus_btn.move(self.canvas.width() - 160, 68)
+            # Pin sim toggle to bottom-right corner
+            self.sim_toggle_icon.move(self.canvas.width() - 56, self.canvas.height() - 56)
+            # Pin sim panel above the toggle button
+            self.sim_objects_panel.move(self.canvas.width() - 292, self.canvas.height() - 444)
             
         self.canvas.resizeEvent = patched_resize
         
@@ -573,6 +699,10 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         self.canvas.on_drop_callback = self.sync_link_transform
         self.canvas.on_deselect_callback = self.on_deselect
 
+    def _toggle_sim_panel(self):
+        """Toggle the simulation objects popup panel."""
+        visible = self.sim_objects_panel.isVisible()
+        self.sim_objects_panel.setVisible(not visible)
 
 if __name__ == "__main__":
     import sys
