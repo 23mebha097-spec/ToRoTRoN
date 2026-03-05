@@ -6,6 +6,8 @@ class Link:
         self.mesh = mesh  # trimesh object
         self.color = "lightgray"
         self.is_base = False
+        self.pick_pos = [0.0, 0.0, 0.0]
+        self.place_pos = [0.0, 0.0, 0.0]
         
         # Local offset matrix from alignment system
         self.t_offset = np.eye(4)

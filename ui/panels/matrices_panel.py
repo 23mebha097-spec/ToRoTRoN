@@ -60,6 +60,17 @@ class MatricesPanel(QtWidgets.QWidget):
             return
 
         for child_name, data in joint_data.items():
+            # Hide slave joints - their movement is driven by the master
+            joint_id = data.get('joint_id', child_name)
+            is_slave = False
+            for master, slaves in self.mw.robot.joint_relations.items():
+                if any(s_id == joint_id for s_id, r in slaves):
+                    is_slave = True
+                    break
+            
+            if is_slave:
+                continue
+
             # Container for each joint's control
             group = QtWidgets.QFrame()
             group.setStyleSheet("background-color: transparent; border-radius: 5px; margin-bottom: 5px;")
@@ -188,17 +199,28 @@ class MatricesPanel(QtWidgets.QWidget):
             self.text_area.append("\nUse the 'Joint' tab to create a link first.")
             return
 
-        self.text_area.append("--- ACTIVE JOINT MATRICES ---")
+        self.text_area.append("--- ACTIVE JOINT MATRICES (cm) ---")
         self.text_area.append("")
 
         for child_name, data in created_joints.items():
+            # Skip slave joints - we only show master/independent matrices
+            joint_id = data.get('joint_id', child_name)
+            is_slave = False
+            for master, slaves in robot.joint_relations.items():
+                if any(s_id == joint_id for s_id, r in slaves):
+                    is_slave = True
+                    break
+            
+            if is_slave:
+                continue
+
             parent_name = data['parent']
             joint_id = data.get('joint_id', f"joint_{parent_name}_{child_name}")
             custom_name = data.get('custom_name', joint_id)
             
             if joint_id in robot.joints:
                 joint = robot.joints[joint_id]
-                self.text_area.append(f"Matrix: {custom_name}")
+                self.text_area.append(f"Matrix: {custom_name} (cm)")
                 
                 # Full relative transform (Offset * Rotation)
                 rot = joint.get_matrix()
@@ -210,7 +232,12 @@ class MatricesPanel(QtWidgets.QWidget):
                 self.text_area.append("")
 
     def format_matrix(self, mat):
+        # Scale translation to CM based on adjustable graph ratio
+        ratio = self.mw.canvas.grid_units_per_cm
+        mat_cm = np.copy(mat)
+        mat_cm[:3, 3] /= ratio
+        
         lines = []
-        for row in mat:
+        for row in mat_cm:
             lines.append("  ".join([f"{x:7.3f}" for x in row]))
         return "\n".join(lines)

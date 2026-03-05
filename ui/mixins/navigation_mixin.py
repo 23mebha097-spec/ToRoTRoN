@@ -1,4 +1,4 @@
-from PyQt5 import QtWidgets, QtCore
+from PyQt5 import QtWidgets, QtCore, QtGui
 import numpy as np
 
 from core.firmware_gen import generate_esp32_firmware
@@ -105,6 +105,11 @@ class NavigationMixin:
             self.save_btn.setEnabled(False)
             self.load_btn.setEnabled(False)
             
+            # Show Import Object button and Simulation Panel
+            self.import_obj_btn.setVisible(True)
+            self.sim_objects_panel.setVisible(True)
+            self.refresh_sim_objects_list()
+            
         else:
             # Exit Simulation Mode
             self.log("Exiting Simulation Mode...")
@@ -118,6 +123,10 @@ class NavigationMixin:
             # Enable controls
             self.save_btn.setEnabled(True)
             self.load_btn.setEnabled(True)
+            
+            # Hide Import Object button and Simulation Panel
+            self.import_obj_btn.setVisible(False)
+            self.sim_objects_panel.setVisible(False)
             
             # Remove any speed overlay from canvas
             self.canvas.plotter.remove_actor("speed_overlay")
@@ -139,6 +148,98 @@ class NavigationMixin:
             self.speed_spin.blockSignals(False)
         self.show_speed_overlay()
 
+    def refresh_sim_objects_list(self):
+        """Clears and re-populates the simulation objects list from the robot model."""
+        if not hasattr(self, 'sim_objects_list'):
+            return
+            
+        self.sim_objects_list.clear()
+        for name, link in self.robot.links.items():
+            if getattr(link, 'is_sim_obj', False):
+                item = QtWidgets.QListWidgetItem(name)
+                item.setIcon(self.make_sim_obj_icon("#1976d2")) # Blue box icon
+                self.sim_objects_list.addItem(item)
+
+    def make_sim_obj_icon(self, color_str):
+        pixmap = QtGui.QPixmap(16, 16)
+        pixmap.fill(QtGui.QColor(color_str))
+        return QtGui.QIcon(pixmap)
+
+    def on_sim_object_clicked(self, item):
+        """Selects and focuses on the sim object in the 3D scene."""
+        name = item.text()
+        if name in self.canvas.actors:
+            self.canvas.select_actor(name)
+        
+        # Load Pick/Place coordinates into UI
+        if name in self.robot.links:
+            link = self.robot.links[name]
+            
+            # Block signals to avoid self-triggering save while loading
+            for sb in [self.pick_x, self.pick_y, self.pick_z, self.place_x, self.place_y, self.place_z]:
+                sb.blockSignals(True)
+            
+            ratio = self.canvas.grid_units_per_cm
+            self.pick_x.setValue(link.pick_pos[0] / ratio)
+            self.pick_y.setValue(link.pick_pos[1] / ratio)
+            self.pick_z.setValue(link.pick_pos[2] / ratio)
+            
+            self.place_x.setValue(link.place_pos[0] / ratio)
+            self.place_y.setValue(link.place_pos[1] / ratio)
+            self.place_z.setValue(link.place_pos[2] / ratio)
+            
+            for sb in [self.pick_x, self.pick_y, self.pick_z, self.place_x, self.place_y, self.place_z]:
+                sb.blockSignals(False)
+
+    def save_sim_object_coords(self):
+        """Saves current spinbox values back to the selected simulation object."""
+        current_item = self.sim_objects_list.currentItem()
+        if not current_item:
+            return
+            
+        name = current_item.text()
+        if name in self.robot.links:
+            link = self.robot.links[name]
+            ratio = self.canvas.grid_units_per_cm
+            link.pick_pos = [self.pick_x.value() * ratio, self.pick_y.value() * ratio, self.pick_z.value() * ratio]
+            link.place_pos = [self.place_x.value() * ratio, self.place_y.value() * ratio, self.place_z.value() * ratio]
+            # self.log(f"Saved Pick/Place for {name}")
+      
+    def update_live_ui(self):
+        """Updates the Live Point (LP) coordinates based on the robot end effector."""
+        if not hasattr(self, 'live_x'):
+            return
+            
+        # 1. Identify leaf link (TCP)
+        # We look for a link that has a parent joint but no child joints
+        tcp_link = None
+        for link in self.robot.links.values():
+            if link.parent_joint and not link.child_joints:
+                tcp_link = link
+                break
+        
+        # fallback to the first link that isn't base if no clear leaf
+        if not tcp_link:
+            for link in self.robot.links.values():
+                if not link.is_base:
+                    tcp_link = link
+                    break
+        
+        if tcp_link:
+            pos = tcp_link.t_world[:3, 3]
+            self.live_x.blockSignals(True)
+            self.live_y.blockSignals(True)
+            self.live_z.blockSignals(True)
+            
+            ratio = self.canvas.grid_units_per_cm
+            self.live_x.setValue(pos[0] / ratio)
+            self.live_y.setValue(pos[1] / ratio)
+            self.live_z.setValue(pos[2] / ratio)
+            
+            self.live_x.blockSignals(False)
+            self.live_y.blockSignals(False)
+            self.live_z.blockSignals(False)
+
     def show_speed_overlay(self):
         """Displays current speed percentage on the 3D canvas temporarily"""
         text = f"Speed: {self.current_speed}%"
@@ -152,9 +253,10 @@ class NavigationMixin:
         self.canvas.plotter.render()
 
     def on_tab_changed(self, index):
-        # Disable dragging for all tabs except 'Links' (index 0)
+        # Disable dragging for all tabs except 'Links' (index 0) or 'Simulation' (index 5)
         # This prevents accidental movement while Aligning or Creating Joints
-        self.canvas.enable_drag = (index == 0)
+        # In Simulation Mode, we allow dragging but only for 'Simulation Objects' (logic in canvas)
+        self.canvas.enable_drag = (index == 0 or index == 5)
         
         widget = self.panel_stack.widget(index)
         if hasattr(widget, 'refresh_links'):
@@ -163,6 +265,9 @@ class NavigationMixin:
             widget.update_display()
         if hasattr(widget, 'refresh_sliders'):
             widget.refresh_sliders()
+            
+        # Update live point display
+        self.update_live_ui()
 
     def log(self, text):
         """Logs a message to the terminal with color-coded formatting."""

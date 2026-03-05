@@ -29,6 +29,61 @@ class LinksMixin:
         btn_layout.addWidget(self.remove_btn)
         layout.addLayout(btn_layout)
 
+        # Scale Control
+        scale_layout = QtWidgets.QHBoxLayout()
+        scale_label = QtWidgets.QLabel("Scale:")
+        scale_label.setStyleSheet("font-weight: bold; font-size: 11px;")
+        self.scale_spin = QtWidgets.QDoubleSpinBox()
+        self.scale_spin.setRange(0.001, 1000.0)
+        self.scale_spin.setValue(1.0)
+        self.scale_spin.setSingleStep(0.1)
+        self.scale_btn = QtWidgets.QPushButton("Apply Scale")
+        self.scale_btn.clicked.connect(self.apply_manual_scale)
+        
+        scale_layout.addWidget(scale_label)
+        scale_layout.addWidget(self.scale_spin)
+        scale_layout.addWidget(self.scale_btn)
+        layout.addLayout(scale_layout)
+
+        # Graph Scale Mapping (Adjustable Ruler)
+        graph_scale_group = QtWidgets.QGroupBox("Graph Ruler Mapping")
+        graph_scale_layout = QtWidgets.QHBoxLayout(graph_scale_group)
+        graph_scale_label = QtWidgets.QLabel("1 cm = ")
+        self.graph_scale_spin = QtWidgets.QDoubleSpinBox()
+        self.graph_scale_spin.setRange(0.001, 1000.0)
+        self.graph_scale_spin.setValue(10.0) # Default 10mm = 1cm
+        self.graph_scale_spin.setSuffix(" units")
+        self.graph_scale_spin.valueChanged.connect(lambda v: self.canvas.update_grid_scale(v))
+        
+        graph_scale_layout.addWidget(graph_scale_label)
+        graph_scale_layout.addWidget(self.graph_scale_spin)
+        
+        # Quick Presets
+        self.preset_widget = QtWidgets.QWidget()
+        preset_layout = QtWidgets.QHBoxLayout(self.preset_widget)
+        preset_layout.setContentsMargins(0,0,0,0)
+        
+        for label, val in [("MM", 10.0), ("CM", 1.0), ("M", 0.01)]:
+            btn = QtWidgets.QPushButton(label)
+            btn.setFixedWidth(35)
+            btn.setToolTip(f"Set 1cm = {val} units")
+            btn.clicked.connect(lambda checked, v=val: self.graph_scale_spin.setValue(v))
+            preset_layout.addWidget(btn)
+        
+        graph_scale_layout.addWidget(self.preset_widget)
+
+        self.match_scale_btn = QtWidgets.QPushButton("Match Selection")
+        self.match_scale_btn.setToolTip("Set ruler scale based on selected object's longest dimension")
+        self.match_scale_btn.clicked.connect(self.match_scale_to_selected)
+        graph_scale_layout.addWidget(self.match_scale_btn)
+        
+        graph_scale_layout.addStretch()
+        layout.addWidget(graph_scale_group)
+
+        self.link_size_label = QtWidgets.QLabel("Size: 0 x 0 x 0 cm")
+        self.link_size_label.setStyleSheet("color: #666; font-style: italic;")
+        layout.addWidget(self.link_size_label)
+
         self.color_btn = QtWidgets.QPushButton("Change Color")
         self.color_btn.clicked.connect(self.change_color)
         layout.addWidget(self.color_btn)
@@ -41,6 +96,40 @@ class LinksMixin:
         # Allow all objects to be selected, including jointed ones
         # Users may need to select jointed objects to build further joints
         self.canvas.select_actor(name)
+        
+        # Update size label
+        actor = self.canvas.actors.get(name)
+        if actor:
+            b = actor.GetBounds()
+            raw_size = [b[1]-b[0], b[3]-b[2], b[5]-b[4]]
+            ratio = self.canvas.grid_units_per_cm
+            self.link_size_label.setText(f"Size: {raw_size[0]/ratio:.1f} x {raw_size[1]/ratio:.1f} x {raw_size[2]/ratio:.1f} cm")
+            
+    def match_scale_to_selected(self):
+        """Automatically sets the ruler scale to match the selected object's units (e.g. 10 for mm)."""
+        if not self.canvas.selected_name:
+            self.log("Select an object first to match scale.")
+            return
+            
+        actor = self.canvas.actors.get(self.canvas.selected_name)
+        if actor:
+            b = actor.GetBounds()
+            raw_max = max(b[1]-b[0], b[3]-b[2], b[5]-b[4])
+            
+            # Simple heuristic: If max dimension is > 150, it's likely MM. If < 20, CM.
+            # But we can ask the user what the physical length of the longest side is.
+            val, ok = QtWidgets.QInputDialog.getDouble(
+                self, "Object Physical Length", 
+                f"What is the actual length of this component's longest side (currently {raw_max:.1f} units)?",
+                value=raw_max/self.graph_scale_spin.value(), decimals=1
+            )
+            
+            if ok and val > 0:
+                new_ratio = raw_max / val
+                self.graph_scale_spin.setValue(new_ratio)
+                self.log(f"Ruler adjusted: 1 cm = {new_ratio:.2f} units")
+                # Refresh size label
+                self.on_link_selected(self.links_list.currentItem())
         
         # Update button text based on whether selection is the base
         if self.robot.base_link and name == self.robot.base_link.name:
@@ -144,6 +233,7 @@ class LinksMixin:
         self.robot.update_kinematics()
         self.canvas.update_transforms(self.robot)
         self.update_link_colors()
+        self.refresh_sim_objects_list()
 
     def update_link_colors(self):
         """Updates the icons in the link list to show Base (Red) vs Normal/Joint (Green)."""
@@ -192,6 +282,31 @@ class LinksMixin:
             self.update_link_colors()
             self.log(f"Changed color of {name} to {hex_color}")
 
+    def apply_manual_scale(self):
+        """Manually scales the selected link mesh."""
+        item = self.links_list.currentItem()
+        if not item:
+            return
+            
+        name = item.text()
+        if name not in self.robot.links:
+            return
+            
+        scale = self.scale_spin.value()
+        if scale == 1.0:
+            return
+            
+        link = self.robot.links[name]
+        try:
+            link.mesh.apply_scale(scale)
+            # Re-apply transform to refresh visual
+            self.canvas.update_link_mesh(name, link.mesh, link.t_world, color=link.color)
+            self.log(f"Scaled {name} by {scale}x")
+            # Reset spinbox
+            self.scale_spin.setValue(1.0)
+        except Exception as e:
+            self.log(f"Scale Error: {e}")
+
     def import_mesh(self):
         file_path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "Import Mesh", "", "3D Files (*.stl *.step *.stp *.obj)"
@@ -214,16 +329,21 @@ class LinksMixin:
                      self.log("ERROR: Imported mesh has 0 vertices! The file might be empty or incompatible.")
                      return
 
-                # Log mesh stats
-                num_v = len(mesh.vertices)
+                # IMPORT "AS IS" - No forced scale ratios
                 bounds = mesh.bounds
-                size = bounds[1] - bounds[0]
-                center = mesh.centroid
-                self.log(f"Original Center: {center}")
-                
-                # NOTE: We do NOT auto-center the mesh geometry anymore.
-                # Preserving the original CAD origin is critical for correct joint rotation.
+                raw_size = bounds[1] - bounds[0]
+                max_dim = max(raw_size)
+                self.log(f"Original CAD Units: {raw_size[0]:.1f} x {raw_size[1]:.1f} x {raw_size[2]:.1f}")
 
+                # Automatic Unit Detection (No permissions needed)
+                # If object is very small (e.g. 0.3), it's likely Meters. If 300+, likely MM.
+                if max_dim < 1.0:
+                    self.log(f"Auto-Detected: Unit appears to be METERS ({max_dim:.3f} units). Adjusting graph...")
+                    self.graph_scale_spin.setValue(0.01)
+                elif max_dim > 150 and self.graph_scale_spin.value() == 1.0:
+                    self.log(f"Auto-Detected: Unit appears to be MILLIMETERS ({max_dim:.1f} units). Adjusting graph...")
+                    self.graph_scale_spin.setValue(10.0)
+                
                 # Assign a random distinct color
                 colors = ["#e74c3c", "#3498db", "#2ecc71", "#f1c40f", "#9b59b6", "#1abc9c", "#e67e22", "#95a5a6"]
                 link_color = random.choice(colors)
@@ -240,15 +360,26 @@ class LinksMixin:
                 link = self.robot.add_link(name, mesh)
                 link.color = link_color
                 
+                # Tag as Simulation Object if imported in simulation mode
+                if hasattr(self, 'sim_toggle_btn') and self.sim_toggle_btn.isChecked():
+                    link.is_sim_obj = True
+                
                 # Use new helper to add row with 'Eye' button
                 self.add_link_item(name)
                 
-                # Position
+                # Default spawn position: (50, 50, 50) cm
+                ratio = self.canvas.grid_units_per_cm
                 t_import = np.eye(4)
-                t_import[:3, 3] = [1.0, 1.0, 1.0]
+                t_import[:3, 3] = [50.0 * ratio, 50.0 * ratio, 50.0 * ratio]
                 link.t_offset = t_import
                 
                 self.canvas.update_link_mesh(name, mesh, t_import, color=link.color)
+                
+                # SELF-ADJUSTING GRAPH: 
+                # If component is larger than grid, expand the grid automatically
+                actor = self.canvas.actors[name]
+                self.canvas.ensure_grid_fits_bounds(actor.GetBounds())
+                
                 self.log(f"Successfully loaded: {name}")
                 
                 # Auto-select and focus
@@ -256,6 +387,10 @@ class LinksMixin:
                 self.canvas.focus_on_actor(name)
                 
                 self.update_link_colors()
+                
+                # Refresh Simulation Objects list if needed
+                if getattr(link, 'is_sim_obj', False):
+                    self.refresh_sim_objects_list()
                 
             except ImportError as ie:
                 self.log(f"MISSING DEPENDENCY: {str(ie)}")

@@ -715,6 +715,12 @@ class JointPanel(QtWidgets.QWidget):
                     self.mw.log(f"Relation added: {master_id} -> {j_id} (ratio: {ratio})")
             
             self.mw.log(f"Joint relations updated for {master_id}.")
+            
+            # Refresh UI to show "R" badges and hide slave sliders/matrices
+            self.refresh_joints_history()
+            if hasattr(self.mw, 'matrices_tab'):
+                self.mw.matrices_tab.refresh_sliders()
+                self.mw.matrices_tab.update_display()
 
     def select_object(self, name):
         """Selection logic for external calls"""
@@ -815,8 +821,22 @@ class JointPanel(QtWidgets.QWidget):
         
         # Check if this object has a joint
         if object_name in self.joints:
-            # Show joint control for this jointed object
-            self.show_joint_control(object_name)
+            # Check if this joint is a slave of any other joint
+            joint_id = self.joints[object_name].get('joint_id', object_name)
+            is_slave = False
+            for master, slaves in self.mw.robot.joint_relations.items():
+                if any(s_id == joint_id for s_id, r in slaves):
+                    is_slave = True
+                    break
+            
+            if is_slave:
+                # Hide joint control for slaves - their movement is driven by the master
+                self.joint_control_section.setVisible(False)
+                self.active_joint_control = None
+                self.mw.log(f"Joint '{object_name}' is a slave relation - control it via master joint.")
+            else:
+                # Show joint control for this jointed object
+                self.show_joint_control(object_name)
             
             # ALLOW jointed objects to be selected as parents!
             self.selected_object = object_name
@@ -1188,6 +1208,10 @@ class JointPanel(QtWidgets.QWidget):
                 
             # 7. Push updated transforms to the 3D viewer
             self.mw.canvas.update_transforms(self.mw.robot)
+            
+            # 7b. Update Live Point (LP) coordinates UI
+            if hasattr(self.mw, 'update_live_ui'):
+                self.mw.update_live_ui()
 
             # 8. Propagate to related joints
             joint_id = self.joints[child_name].get('joint_id', child_name)

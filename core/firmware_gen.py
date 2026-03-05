@@ -6,7 +6,19 @@ def generate_esp32_firmware(robot, default_speed=50):
     AVAILABLE_PINS = [18, 19, 21, 22, 23, 25, 26, 27, 32, 33]
     
     joints = robot.joints
-    joint_names = list(joints.keys())
+    
+    # Filter out slave joints for firmware - they are not independent control points
+    independent_joint_names = []
+    for j_name in joints.keys():
+        is_slave = False
+        for master, slaves in robot.joint_relations.items():
+            if any(s_id == j_name for s_id, r in slaves):
+                is_slave = True
+                break
+        if not is_slave:
+            independent_joint_names.append(j_name)
+    
+    joint_names = independent_joint_names
     
     code = []
     code.append("/**")

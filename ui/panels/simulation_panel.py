@@ -160,6 +160,15 @@ class SimulationPanel(QtWidgets.QWidget):
             return
 
         for name, joint in robot.joints.items():
+            # Skip slave joints - we only show master/independent controls
+            is_slave = False
+            for master, slaves in robot.joint_relations.items():
+                if any(s_id == name for s_id, r in slaves):
+                    is_slave = True
+                    break
+            if is_slave:
+                continue
+
             container = QtWidgets.QWidget()
             layout = QtWidgets.QVBoxLayout(container)
             layout.setContentsMargins(0, 0, 0, 0)
@@ -265,12 +274,21 @@ class SimulationPanel(QtWidgets.QWidget):
             return
 
         for name, joint in robot.joints.items():
+            # Skip slave joints - we only show master/independent matrices
+            is_slave = False
+            for master, slaves in robot.joint_relations.items():
+                if any(s_id == name for s_id, r in slaves):
+                    is_slave = True
+                    break
+            if is_slave:
+                continue
+
             container = QtWidgets.QWidget()
             layout = QtWidgets.QVBoxLayout(container)
             layout.setContentsMargins(0, 0, 0, 0)
             layout.setSpacing(5)
             
-            header = QtWidgets.QLabel(f"Matrix: {name}")
+            header = QtWidgets.QLabel(f"Matrix: {name} (cm)")
             header.setStyleSheet("font-weight: bold; color: #1565c0;")
             layout.addWidget(header)
             
@@ -286,8 +304,13 @@ class SimulationPanel(QtWidgets.QWidget):
             self.matrix_labels[name] = mat_label
 
     def format_matrix(self, matrix):
+        # Scale translation to CM based on adjustable graph ratio
+        ratio = self.main_window.canvas.grid_units_per_cm
+        mat_cm = np.copy(matrix)
+        mat_cm[:3, 3] /= ratio
+        
         lines = []
-        for row in matrix:
+        for row in mat_cm:
             line = "  ".join([f"{val:6.2f}" for val in row])
             lines.append(f"[ {line} ]")
         return "\n".join(lines)
@@ -299,6 +322,13 @@ class SimulationPanel(QtWidgets.QWidget):
             
             # Update Joint Model
             joint.current_value = float(value)
+            
+            # Propagation to related slave joints
+            if name in self.main_window.robot.joint_relations:
+                for slave_id, ratio in self.main_window.robot.joint_relations[name]:
+                    slave_joint = self.main_window.robot.joints.get(slave_id)
+                    if slave_joint:
+                        slave_joint.current_value = float(value) * ratio
             
             # Update Spinbox and Slider without infinite loop
             if data['slider'].value() != int(value):
@@ -315,6 +345,10 @@ class SimulationPanel(QtWidgets.QWidget):
             
             # Update Graphics
             self.main_window.canvas.update_transforms(self.main_window.robot)
+            
+            # Update Live Point Coordinates UI
+            if hasattr(self.main_window, 'update_live_ui'):
+                self.main_window.update_live_ui()
 
 
             # --- GHOST SHADOW TRAIL ---
@@ -324,9 +358,10 @@ class SimulationPanel(QtWidgets.QWidget):
                 _last = self._last_ghost_angle.get(name, None)
                 _cur_angle = float(value)
                 if _last is None or abs(_cur_angle - _last) >= GHOST_STEP:
-                    _link = joint.child_link
                     import numpy as _np2
-                    import copy
+                    
+                    # 1. Master Joint Trail
+                    _link = joint.child_link
                     _mesh = _link.mesh
                     _transform = _np2.copy(_link.t_world)
                     _col = getattr(_link, 'color', '#888888') or '#888888'
@@ -335,6 +370,22 @@ class SimulationPanel(QtWidgets.QWidget):
                         mesh=_mesh, transform=_transform,
                         color=_col
                     )
+                    
+                    # 2. Related (Slave) Joint Trails
+                    if name in self.main_window.robot.joint_relations:
+                        for slave_id, ratio in self.main_window.robot.joint_relations[name]:
+                            slave_joint = self.main_window.robot.joints.get(slave_id)
+                            if slave_joint:
+                                s_link = slave_joint.child_link
+                                s_mesh = s_link.mesh
+                                s_transform = _np2.copy(s_link.t_world)
+                                s_col = getattr(s_link, 'color', '#888888') or '#888888'
+                                self.main_window.canvas.add_joint_ghost(
+                                    s_link.name,
+                                    mesh=s_mesh, transform=s_transform,
+                                    color=s_col
+                                )
+                    
                     self._last_ghost_angle[name] = _cur_angle
             except Exception:
                 pass

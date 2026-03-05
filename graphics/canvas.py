@@ -19,8 +19,14 @@ class RobotCanvas(QtWidgets.QWidget):
         self.plotter.set_background("white")
         self.plotter.add_axes()
         
+        # Customizable Simulation Scale
+        # Default: 10 units (mm) in CAD file = 1.0 unit (cm) in Graph labels
+        self.grid_units_per_cm = 10.0 
+        self.grid_cm_size = 100.0     # Default 100cm workspace
+        
         # Custom dynamic grid system (3D Graph)
         self._init_custom_grids()
+        self._init_axis_labels()
         
         # Observe camera changes to update grid visibility
         self.plotter.interactor.AddObserver("InteractionEvent", self._on_camera_change)
@@ -72,6 +78,7 @@ class RobotCanvas(QtWidgets.QWidget):
         self.picking_face = False
         self.picking_color = "orange"
         self.enable_drag = True
+        self._selection_dim_actors = []
         
         self.interaction_mode = "rotate" # 'rotate'
 
@@ -333,14 +340,17 @@ class RobotCanvas(QtWidgets.QWidget):
 
     def deselect_all(self):
         """Standard CAD behavior: Escape or blank click clears everything."""
-        # Standard Deselect
         self.selected_name = None
-        self.is_dragging = False
         self.picking_face = False
+        self.clear_highlights()
+        self._update_selection_visuals() # Clear dimension lines
+        if self.on_deselect_callback:
+            self.on_deselect_callback()
         
         # Reset visual highlights (Edge Colors)
         for actor in self.actors.values():
             actor.GetProperty().SetEdgeColor([0.5, 0.5, 0.5])
+        self.plotter.render()
             
         # Clear alignment highlights if any
         self.clear_highlights()
@@ -603,6 +613,20 @@ class RobotCanvas(QtWidgets.QWidget):
                     clicked_name = name
                     break
             
+            # --- SIMULATION MODE DRAG CONSTRAINT ---
+            # In simulation mode, we only allow moving "simulation objects"
+            # (objects imported while in simulation mode).
+            if hasattr(self.window(), 'sim_toggle_btn') and self.window().sim_toggle_btn.isChecked():
+                link = None
+                if clicked_name in self.window().robot.links:
+                    link = self.window().robot.links[clicked_name]
+                
+                if not link or not getattr(link, 'is_sim_obj', False):
+                    self.mw_log(f"⚠ Locked: '{clicked_name}' belongs to the Robot. Only imported Simulation Objects can be moved in this mode.")
+                    self.select_actor(clicked_name)
+                    self.plotter.interactor.GetInteractorStyle().OnLeftButtonDown()
+                    return
+            
             # --- ENGINEERING CONSTRAINT: LOCKED/ALIGNED COMPONENTS ---
             # If a link has a parent joint (i.e., it is aligned/attached to something),
             # it should NOT be moveable by the free-drag tool. It is "Constrained".
@@ -814,6 +838,7 @@ class RobotCanvas(QtWidgets.QWidget):
         # Apply transformation
         self.plotter.camera.position = new_C
         self.plotter.camera.focal_point = new_F
+        self._update_axis_labels()
         self.plotter.render()
     def update_link_mesh(self, link_name, mesh, transform, color="silver"):
         """Adds or updates a link mesh in the scene."""
@@ -827,8 +852,8 @@ class RobotCanvas(QtWidgets.QWidget):
         else:
             poly = mesh # assume it's already pyvista compatible
             
-        # Use provided color instead of hardcoded silver
-        actor = self.plotter.add_mesh(poly, color=color, show_edges=True, name=link_name)
+        # Use provided color, hide edges for cleaner look
+        actor = self.plotter.add_mesh(poly, color=color, show_edges=False, name=link_name)
         # Apply transform
         actor.user_matrix = transform
         self.actors[link_name] = actor
@@ -853,19 +878,92 @@ class RobotCanvas(QtWidgets.QWidget):
             else:
                 actor.GetProperty().SetEdgeColor([0.5, 0.5, 0.5]) # Gray
         self.plotter.render()
+        self.plotter.render()
 
     def remove_actor(self, name):
         """Removes an actor from the scene by name."""
         if name in self.actors:
+            if self.selected_name == name:
+                self.deselect_all()
             self.plotter.remove_actor(self.actors[name])
             del self.actors[name]
-            
-            # If the removed actor was selected, clear selection
-            if self.selected_name == name:
-                self.selected_name = None
-                self.is_dragging = False
-                
             self.plotter.render()
+
+    def _update_selection_visuals(self):
+        """Draws dimension lines and labels around the selected object."""
+        # 1. Clean up old actors
+        if not hasattr(self, '_selection_dim_actors'):
+             self._selection_dim_actors = []
+             
+        for actor in self._selection_dim_actors:
+            self.plotter.renderer.RemoveActor(actor)
+        self._selection_dim_actors = []
+
+        if not self.selected_name or self.selected_name not in self.actors:
+            return
+
+        actor = self.actors[self.selected_name]
+        try:
+            # actor.GetBounds() returns (xmin, xmax, ymin, ymax, zmin, zmax)
+            b = actor.GetBounds()
+            
+            # Use small offset to prevent Z-fighting with the mesh
+            pad = (b[1]-b[0]) * 0.05
+            if pad == 0: pad = 0.5
+            
+            ratio = self.grid_units_per_cm
+            
+            # Draw 3 representative dimension lines: X, Y, Z
+            # X dimension line (bottom edge)
+            self._create_dim_line(
+                (b[0], b[2]-pad, b[4]), (b[1], b[2]-pad, b[4]), 
+                f"X: {(b[1]-b[0])/ratio:.1f} cm", "#1976d2"
+            )
+            
+            # Y dimension line
+            self._create_dim_line(
+                (b[1]+pad, b[2], b[4]), (b[1]+pad, b[3], b[4]), 
+                f"Y: {(b[3]-b[2])/ratio:.1f} cm", "#388E3C"
+            )
+            
+            # Z dimension line
+            self._create_dim_line(
+                (b[0]-pad, b[2]-pad, b[4]), (b[0]-pad, b[2]-pad, b[5]), 
+                f"Z: {(b[5]-b[4])/ratio:.1f} cm", "#D32F2F"
+            )
+
+        except Exception as e:
+            print(f"Error drawing dimensions: {e}")
+
+    def _create_dim_line(self, start, end, label, color):
+        """Helper to create a 3D line with a centered billboard label."""
+        import vtkmodules.vtkRenderingCore as vtkRC
+        
+        # 1. The Line
+        try:
+            line_mesh = pv.Line(start, end)
+            actor = self.plotter.add_mesh(
+                line_mesh, color=color, line_width=2, 
+                pickable=False, lighting=False, name=f"_dim_line_{label}"
+            )
+            self._selection_dim_actors.append(actor)
+            
+            # 2. The Label (Billboard)
+            mid = [(start[i] + end[i])/2.0 for i in range(3)]
+            txt_actor = vtkRC.vtkBillboardTextActor3D()
+            txt_actor.SetInput(label)
+            txt_actor.SetPosition(mid[0], mid[1], mid[2])
+            txt_actor.GetTextProperty().SetFontSize(12)
+            txt_actor.GetTextProperty().SetColor(pv.Color(color))
+            txt_actor.GetTextProperty().SetBold(True)
+            txt_actor.GetTextProperty().SetFontFamilyToArial()
+            txt_actor.GetTextProperty().SetJustificationToCentered()
+            txt_actor.SetPickable(False)
+            
+            self.plotter.renderer.AddActor(txt_actor)
+            self._selection_dim_actors.append(txt_actor)
+        except Exception:
+            pass
 
     def update_transforms(self, robot):
         """Updates all actor transforms based on robot's current kinematics state."""
@@ -877,9 +975,15 @@ class RobotCanvas(QtWidgets.QWidget):
 
     def _init_custom_grids(self):
         """Creates the 3 principal plane grids for the '3D Graph' system."""
+        # Clean up existing grids if any
+        if hasattr(self, 'grids'):
+            for actor in self.grids.values():
+                self.plotter.remove_actor(actor)
+        
         self.grids = {}
-        size = 10.0  # Compact workspace
-        res = 100    # Much higher density (0.1 unit spacing)
+        # Dynamic size: grid_cm_size * units_per_cm
+        size = self.grid_cm_size * self.grid_units_per_cm
+        res = int(self.grid_cm_size) # 1 line per CM
         
         # 1. XY Grid (Bottom/Top) - Blueish tint
         xy_mesh = pv.Plane(center=(0, 0, 0), direction=(0, 0, 1), i_size=size, j_size=size, i_resolution=res, j_resolution=res)
@@ -902,6 +1006,187 @@ class RobotCanvas(QtWidgets.QWidget):
         # Initially hide all except XY
         for name, actor in self.grids.items():
             actor.SetVisibility(name == 'xy')
+
+    def _init_axis_labels(self):
+        """Creates distance labels along the center axis lines (through origin)."""
+        import vtkmodules.vtkRenderingCore as vtkRC
+        import vtkmodules.vtkRenderingFreeType as vtkFT  # noqa - needed for text rendering
+        
+        self._axis_labels = []  # List of {'actor', 'val', 'grid', 'axis'}
+        self._center_axis_actors = {}  # Grid key -> list of line actors
+        
+        # Dynamic half-size based on workspace size
+        half = (self.grid_cm_size / 2.0) * self.grid_units_per_cm
+        offset = self.grid_units_per_cm * 0.5  # Label offset
+        
+        # Calculate dynamic ticks: Label every 5cm
+        cm_interval = 5.0
+        unit_interval = cm_interval * self.grid_units_per_cm
+        ticks = [i for i in np.arange(-half, half + 1.0, unit_interval) if abs(i) > 1e-6]
+        
+        # Dark color for labels (readable on light grid)
+        label_color = (0.25, 0.25, 0.25)  # Dark gray
+        
+        # ── CENTER AXIS LINES (bold dark lines through origin) ──
+        axis_line_defs = {
+            # grid -> list of (start_point, end_point)
+            'xy': [
+                ((-half, 0, 0), (half, 0, 0)),  # X-axis line
+                ((0, -half, 0), (0, half, 0)),   # Y-axis line
+            ],
+            'xz': [
+                ((-half, 0, 0), (half, 0, 0)),  # X-axis line
+                ((0, 0, -half), (0, 0, half)),   # Z-axis line
+            ],
+            'yz': [
+                ((0, -half, 0), (0, half, 0)),  # Y-axis line
+                ((0, 0, -half), (0, 0, half)),   # Z-axis line
+            ],
+        }
+        
+        for grid_key, lines in axis_line_defs.items():
+            actors = []
+            for start, end in lines:
+                line_mesh = pv.Line(start, end, resolution=1)
+                actor = self.plotter.add_mesh(
+                    line_mesh, color="#333333", line_width=2,
+                    name=f"_centerline_{grid_key}_{start}", pickable=False, lighting=False
+                )
+                actors.append(actor)
+            self._center_axis_actors[grid_key] = actors
+        
+        # Initially show only XY center lines
+        for gk, actors in self._center_axis_actors.items():
+            for a in actors:
+                a.SetVisibility(gk == 'xy')
+        
+        # ── DISTANCE LABELS along center axes ──
+        # Labels placed ON the axis lines with a small perpendicular offset
+        # XY grid: X-labels along y=0 line (offset in -Y), Y-labels along x=0 line (offset in -X)
+        # XZ grid: X-labels along z=0 line (offset in -Z), Z-labels along x=0 line (offset in -X)
+        # YZ grid: Y-labels along z=0 line (offset in -Z), Z-labels along y=0 line (offset in -Y)
+        label_defs = [
+            # (grid, axis, position_fn) — offset perpendicular to the axis so text doesn't overlap the line
+            ('xy', 'x', lambda t: (t, -offset, 0)),       # Numbers along X-axis, nudged below
+            ('xy', 'y', lambda t: (-offset, t, 0)),        # Numbers along Y-axis, nudged left
+            ('xz', 'x', lambda t: (t, 0, -offset)),       # Numbers along X-axis
+            ('xz', 'z', lambda t: (-offset, 0, t)),        # Numbers along Z-axis
+            ('yz', 'y', lambda t: (0, t, -offset)),        # Numbers along Y-axis
+            ('yz', 'z', lambda t: (0, -offset, t)),        # Numbers along Z-axis
+        ]
+        
+        for grid_key, axis_name, pos_fn in label_defs:
+            for tick_val in ticks:
+                pos = pos_fn(tick_val)
+                # Calculate the CM value for this internal unit coordinate
+                cm_val = tick_val / self.grid_units_per_cm
+                txt = f"{cm_val:.0f} cm"
+                
+                # Billboard text actor — always faces camera
+                txt_actor = vtkRC.vtkBillboardTextActor3D()
+                txt_actor.SetInput(txt)
+                txt_actor.SetPosition(pos[0], pos[1], pos[2])
+                txt_actor.GetTextProperty().SetFontSize(14)
+                txt_actor.GetTextProperty().SetColor(label_color)
+                txt_actor.GetTextProperty().SetJustificationToCentered()
+                txt_actor.GetTextProperty().SetBold(True)
+                txt_actor.GetTextProperty().SetFontFamilyToArial()
+                txt_actor.SetPickable(False)
+                
+                self.plotter.renderer.AddActor(txt_actor)
+                
+                self._axis_labels.append({
+                    'actor': txt_actor,
+                    'val': tick_val,
+                    'grid': grid_key,
+                    'axis': axis_name,
+                })
+        
+        # Initially show only XY labels
+        for lbl in self._axis_labels:
+            lbl['actor'].SetVisibility(lbl['grid'] == 'xy')
+
+    def update_grid_scale(self, units_per_cm):
+        """Updates the graph labeling scale to match robot units (e.g., 10.0 for mm)."""
+        self.grid_units_per_cm = float(units_per_cm)
+        self._refresh_grid_visuals()
+
+    def ensure_grid_fits_bounds(self, bounds):
+        """Checks if the component bounds exceed the current grid and expands it if necessary."""
+        # bounds = (xmin, xmax, ymin, ymax, zmin, zmax)
+        raw_max = max(abs(bounds[0]), abs(bounds[1]), abs(bounds[2]), abs(bounds[3]), abs(bounds[4]), abs(bounds[5]))
+        cm_needed = (raw_max / self.grid_units_per_cm) * 2.2 # Add padding
+        
+        if cm_needed > self.grid_cm_size:
+            self.grid_cm_size = cm_needed
+            self._refresh_grid_visuals()
+
+    def _refresh_grid_visuals(self):
+        """Internal helper to redraw grids and labels when size or ratio changes."""
+        # Cleanup old labels and center lines
+        if hasattr(self, '_axis_labels'):
+            for lbl in self._axis_labels:
+                self.plotter.renderer.RemoveActor(lbl['actor'])
+        if hasattr(self, '_center_axis_actors'):
+            for actors in self._center_axis_actors.values():
+                for a in actors:
+                    self.plotter.remove_actor(a)
+
+        # Re-initialize everything with new scale/size
+        self._init_custom_grids() 
+        self._init_axis_labels()  
+        self.plotter.render()
+
+    def _update_axis_labels(self):
+        """Update axis label & center line visibility based on camera view and zoom."""
+        if not hasattr(self, '_axis_labels'):
+            return
+        
+        # Camera distance for tick density
+        cam_pos = np.array(self.plotter.camera.position)
+        focal = np.array(self.plotter.camera.focal_point)
+        cam_dist = np.linalg.norm(cam_pos - focal)
+        
+        # Tick spacing: closer = show every 1, medium = every 2, far = every 5
+        if cam_dist < 10:
+            spacing = 1
+        elif cam_dist < 20:
+            spacing = 2
+        else:
+            spacing = 5
+        
+        # Which grids are visible (snapped view detection)
+        direction = focal - cam_pos
+        norm = np.linalg.norm(direction)
+        if norm < 1e-6:
+            return
+        direction /= norm
+        abs_dir = np.abs(direction)
+        tol = 0.95
+        
+        show_xy = abs_dir[2] > tol
+        show_xz = abs_dir[1] > tol
+        show_yz = abs_dir[0] > tol
+        is_snapped = show_xy or show_xz or show_yz
+        
+        grid_vis = {
+            'xy': True,  # XY grid is always visible (default ground plane)
+            'xz': show_xz,
+            'yz': show_yz,
+        }
+        
+        # Update center axis lines visibility
+        if hasattr(self, '_center_axis_actors'):
+            for gk, actors in self._center_axis_actors.items():
+                vis = grid_vis.get(gk, False)
+                for a in actors:
+                    a.SetVisibility(vis)
+        
+        # Update label visibility
+        for lbl in self._axis_labels:
+            gv = grid_vis.get(lbl['grid'], False)
+            tv = (abs(lbl['val']) % spacing) == 0 if spacing > 1 else True
+            lbl['actor'].SetVisibility(gv and tv)
 
     def _on_camera_change(self, *args):
         """Dynamically toggles grid visibility based on camera orientation."""
@@ -945,7 +1230,8 @@ class RobotCanvas(QtWidgets.QWidget):
             self.grids['yz'].SetVisibility(show_yz)
             self.grids['yz'].GetProperty().SetOpacity(0.5 if show_yz else 0.3)
         
-        # self.plotter.render() # Observer might already trigger render, but safe to call
+        # Update axis labels based on zoom and grid visibility
+        self._update_axis_labels()
     def _init_ghost_system(self):
         """Initialize ghost trail tracking (called lazily on first use)."""
         if not hasattr(self, '_ghost_data'):
