@@ -14,50 +14,76 @@ class AlignPanel(QtWidgets.QWidget):
 
     def init_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
         
-        # 1. Selection Mode Header
+        # 1. Section Header
         header = QtWidgets.QLabel("ASSEMBLY ALIGNMENT")
-        header.setFont(QtGui.QFont("Segoe UI", 12, QtGui.QFont.Bold))
-        header.setStyleSheet("color: #1976d2; margin-bottom: 10px;")
+        header.setFont(QtGui.QFont("Segoe UI", 14, QtGui.QFont.Bold))
+        header.setStyleSheet("color: #1976d2; margin-bottom: 6px;")
         layout.addWidget(header)
 
         # 2. Parent Picking
-        layout.addWidget(QtWidgets.QLabel("STEP 1: Pick Parent Face"))
+        step1_lbl = QtWidgets.QLabel("Step 1: Pick Parent Face")
+        step1_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #424242; padding: 4px 0;")
+        layout.addWidget(step1_lbl)
         self.parent_btn = QtWidgets.QPushButton("Select Parent Face")
+        self.parent_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.parent_btn.setStyleSheet("font-size: 14px; padding: 10px;")
         self.parent_btn.clicked.connect(self.pick_parent_face)
         layout.addWidget(self.parent_btn)
         
         self.parent_label = QtWidgets.QLabel("Parent: None selected")
+        self.parent_label.setStyleSheet("font-size: 13px; color: #757575; padding: 2px 4px;")
         layout.addWidget(self.parent_label)
 
-        layout.addSpacing(10)
+        layout.addSpacing(8)
 
         # 3. Child Picking
-        layout.addWidget(QtWidgets.QLabel("STEP 2: Pick Child Face"))
+        step2_lbl = QtWidgets.QLabel("Step 2: Pick Child Face")
+        step2_lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #424242; padding: 4px 0;")
+        layout.addWidget(step2_lbl)
         self.child_btn = QtWidgets.QPushButton("Select Child Face")
+        self.child_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.child_btn.setStyleSheet("font-size: 14px; padding: 10px;")
         self.child_btn.clicked.connect(self.pick_child_face)
         layout.addWidget(self.child_btn)
         
         self.child_label = QtWidgets.QLabel("Child: None selected")
+        self.child_label.setStyleSheet("font-size: 13px; color: #757575; padding: 2px 4px;")
         layout.addWidget(self.child_label)
 
-        layout.addSpacing(10)
+        layout.addSpacing(8)
         
         # Flip Option
         self.flip_check = QtWidgets.QCheckBox("Flip Direction")
+        self.flip_check.setStyleSheet("font-size: 14px; padding: 4px;")
         self.flip_check.stateChanged.connect(self.apply_alignment)
         layout.addWidget(self.flip_check)
 
-        layout.addSpacing(10)
+        layout.addSpacing(8)
 
         # 4. Action Buttons
         button_layout = QtWidgets.QHBoxLayout()
         self.align_btn = QtWidgets.QPushButton("Align Components")
+        self.align_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.align_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1976d2;
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                padding: 10px;
+                border: none;
+                border-radius: 8px;
+            }
+            QPushButton:hover { background-color: #1565c0; }
+        """)
         self.align_btn.clicked.connect(self.apply_alignment)
         button_layout.addWidget(self.align_btn)
         layout.addLayout(button_layout)
 
-        layout.addSpacing(20)
+        layout.addSpacing(16)
 
         # 5. Fine Tuning
         layout.addWidget(QtWidgets.QLabel("FINE ROTATION (Deg)"))

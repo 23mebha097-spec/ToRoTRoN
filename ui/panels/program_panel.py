@@ -380,6 +380,28 @@ class ProgramPanel(QtWidgets.QWidget):
         self.lang_btns["command"].setChecked(True)
         layout.addLayout(lang_layout)
 
+        # --- BUILD FIRMWARE BUTTON ---
+        self.build_fw_btn = QtWidgets.QPushButton("Build Firmware")
+        self.build_fw_btn.setToolTip("Generate ESP32 Arduino code for all joints")
+        self.build_fw_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.build_fw_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1976d2;
+                color: white;
+                font-weight: bold;
+                padding: 12px;
+                font-size: 14px;
+                border: none;
+                border-radius: 8px;
+                margin-top: 8px;
+            }
+            QPushButton:hover {
+                background-color: #1565c0;
+            }
+        """)
+        self.build_fw_btn.clicked.connect(lambda: self.mw.on_generate_code())
+        layout.addWidget(self.build_fw_btn)
+
     def set_language(self, lang_key):
         """Switches the editor template and parsing mode."""
         self.current_lang = lang_key

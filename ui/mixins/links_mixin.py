@@ -9,18 +9,56 @@ class LinksMixin:
 
     def setup_links_tab(self):
         layout = QtWidgets.QVBoxLayout(self.links_tab)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
         
-        import_btn = QtWidgets.QPushButton("Import STEP/STL")
+        # Section header
+        header = QtWidgets.QLabel("COMPONENTS")
+        header.setStyleSheet("color: #1976d2; font-size: 16px; font-weight: bold; padding: 4px 0;")
+        layout.addWidget(header)
+        
+        import_btn = QtWidgets.QPushButton("Import STEP / STL")
+        import_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        import_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1976d2;
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                padding: 12px;
+                border: none;
+                border-radius: 8px;
+            }
+            QPushButton:hover { background-color: #1565c0; }
+        """)
         import_btn.clicked.connect(self.import_mesh)
         layout.addWidget(import_btn)
         
         self.links_list = QtWidgets.QListWidget()
+        self.links_list.setStyleSheet("""
+            QListWidget {
+                background-color: white;
+                border: 1px solid #e0e0e0;
+                border-radius: 6px;
+                font-size: 14px;
+            }
+            QListWidget::item {
+                padding: 6px 4px;
+                border-bottom: 1px solid #f0f0f0;
+            }
+            QListWidget::item:selected {
+                background-color: #e3f2fd;
+            }
+        """)
         self.links_list.itemClicked.connect(self.on_link_selected)
         layout.addWidget(self.links_list)
         
         btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.setSpacing(8)
         self.set_base_btn = QtWidgets.QPushButton("Set as Base")
+        self.set_base_btn.setCursor(QtCore.Qt.PointingHandCursor)
         self.remove_btn = QtWidgets.QPushButton("Remove")
+        self.remove_btn.setCursor(QtCore.Qt.PointingHandCursor)
         
         self.set_base_btn.clicked.connect(self.set_as_base)
         self.remove_btn.clicked.connect(self.remove_link)
@@ -85,6 +123,7 @@ class LinksMixin:
         layout.addWidget(self.link_size_label)
 
         self.color_btn = QtWidgets.QPushButton("Change Color")
+        self.color_btn.setCursor(QtCore.Qt.PointingHandCursor)
         self.color_btn.clicked.connect(self.change_color)
         layout.addWidget(self.color_btn)
         
@@ -402,40 +441,42 @@ class LinksMixin:
                 self.log(f"Error: {str(e)}")
 
     def add_link_item(self, name):
-        """Helper to add an item to the list with a nested 'Eye' focus button."""
+        """Helper to add an item to the list with a focus button."""
         item = QtWidgets.QListWidgetItem(self.links_list)
         item.setText(name)
         
         # Create custom widget for the row
         widget = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(widget)
-        layout.setContentsMargins(10, 2, 5, 2)
+        layout.setContentsMargins(10, 4, 8, 4)
         
         # Label with Name
         name_label = QtWidgets.QLabel(name)
-        name_label.setStyleSheet("border: none;")
+        name_label.setStyleSheet("border: none; font-size: 14px; font-weight: bold; color: #212121;")
         layout.addWidget(name_label)
         layout.addStretch()
         
-        # 'Eye' Focus Button
-        eye_btn = QtWidgets.QPushButton("👁") # Eye symbol
-        eye_btn.setToolTip(f"Focus on {name}")
-        eye_btn.setFixedSize(28, 28)
-        eye_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        eye_btn.setStyleSheet("""
+        # Focus Button — uses Qt standard icon (always visible on Windows)
+        focus_btn = QtWidgets.QPushButton()
+        focus_btn.setIcon(widget.style().standardIcon(QtWidgets.QStyle.SP_FileDialogContentsView))
+        focus_btn.setToolTip(f"Focus on {name}")
+        focus_btn.setAccessibleName(f"Focus {name}")
+        focus_btn.setFixedSize(32, 32)
+        focus_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        focus_btn.setStyleSheet("""
             QPushButton {
-                background-color: transparent;
-                border: none;
-                border-radius: 14px;
-                font-size: 16px;
-                color: #1976d2;
+                background-color: white;
+                border: 2px solid #e0e0e0;
+                border-radius: 16px;
+                padding: 4px;
             }
             QPushButton:hover {
-                background-color: #e3f2fd;
+                background-color: white;
+                border-color: #1976d2;
             }
         """)
-        eye_btn.clicked.connect(lambda: self.canvas.focus_on_actor(name))
-        layout.addWidget(eye_btn)
+        focus_btn.clicked.connect(lambda: self.canvas.focus_on_actor(name))
+        layout.addWidget(focus_btn)
         
         # Apply to list
         self.links_list.addItem(item)
