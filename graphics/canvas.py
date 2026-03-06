@@ -739,6 +739,7 @@ class RobotCanvas(QtWidgets.QWidget):
 
             # CHECK: Is this the Base Link? (Bases are fixed/non-pickable for dragging)
             if clicked_name in self.fixed_actors:
+                self.mw_log(f"⚠️ Locked: '{clicked_name}' is the Base and its position is frozen.")
                 # Just let the camera rotate, don't select or drag
                 self.plotter.interactor.GetInteractorStyle().OnLeftButtonDown()
                 return

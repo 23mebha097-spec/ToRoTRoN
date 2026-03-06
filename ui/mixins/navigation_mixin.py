@@ -106,6 +106,11 @@ class NavigationMixin:
             
         link = self.robot.links[name]
         
+        # --- BASE PROTECTION RULE: The Base is functionally fixed at (0,0,0) ---
+        if link.is_base:
+            self.log(f"⚠️ Locked: '{name}' is the Base and its position is frozen.")
+            return
+        
         # We need to save the new transform as 't_offset'
         # If the link has a parent, we must save the offset RELATIVE to that parent
         if link.parent_joint:
@@ -281,6 +286,8 @@ class NavigationMixin:
         name = current_item.text()
         if name in self.robot.links:
             link = self.robot.links[name]
+            if link.is_base:
+                return
             ratio = self.canvas.grid_units_per_cm
             link.pick_pos = [self.pick_x.value() * ratio, self.pick_y.value() * ratio, self.pick_z.value() * ratio]
             link.place_pos = [self.place_x.value() * ratio, self.place_y.value() * ratio, self.place_z.value() * ratio]
