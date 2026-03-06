@@ -310,6 +310,18 @@ class AlignPanel(QtWidgets.QWidget):
         self.mw.canvas.start_face_picking(self.on_child_face_picked, color="red")
 
     def on_child_face_picked(self, name, center, normal):
+        # --- BASE PROTECTION RULE: The Base and Jointed parts cannot move for alignment ---
+        if name in self.mw.robot.links:
+            link = self.mw.robot.links[name]
+            if link.is_base:
+                self.mw.log(f"⚠️ Locked: '{name}' is the Base and cannot be moved for alignment.")
+                QtWidgets.QMessageBox.warning(self, "Locked", f"The Base component '{name}' is fixed and cannot be moved to align with another part.")
+                return
+            if link.parent_joint:
+                self.mw.log(f"⚠️ Locked: '{name}' is jointed and cannot be moved freely for alignment.")
+                QtWidgets.QMessageBox.warning(self, "Locked", f"'{name}' is already jointed. Remove the joint before re-aligning.")
+                return
+
         self.push_history()
         self.child_pick_data = {"name": name, "center": center, "normal": normal}
         self.child_label.setText(f"Child: {name}")

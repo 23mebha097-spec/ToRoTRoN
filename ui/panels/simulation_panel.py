@@ -275,6 +275,28 @@ class SimulationPanel(QtWidgets.QWidget):
         name = current_item.text()
         if name in self.main_window.robot.links:
             link = self.main_window.robot.links[name]
+            
+            # --- COMPLIANCE CHECK: Base, Aligned, or Jointed cannot be moved ---
+            is_aligned = False
+            if hasattr(self.main_window, 'alignment_cache'):
+                for (p, c), pt in self.main_window.alignment_cache.items():
+                    if c == name:
+                        is_aligned = True; break
+            
+            if link.is_base:
+                reason = "Base"
+            elif link.parent_joint:
+                reason = "Jointed"
+            elif is_aligned:
+                reason = "Aligned"
+            else:
+                reason = None
+                
+            if reason:
+                self.main_window.log(f"⚠️ Locked: '{name}' is {reason} and cannot be moved.")
+                self.main_window.show_toast(f"{reason} is fixed", "warning")
+                return
+
             ratio = self.main_window.canvas.grid_units_per_cm
             
             # Target P1 Position (scaled to graph units)

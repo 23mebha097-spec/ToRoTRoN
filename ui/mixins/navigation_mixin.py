@@ -244,6 +244,15 @@ class NavigationMixin:
             for sb in [self.pick_x, self.pick_y, self.pick_z, self.place_x, self.place_y, self.place_z]:
                 sb.blockSignals(True)
             
+            # --- COMPLIANCE CHECK: Base, Aligned, or Jointed cannot be moved ---
+            is_aligned = False
+            if hasattr(self, 'alignment_cache'):
+                for (p, c), pt in self.alignment_cache.items():
+                    if c == name:
+                        is_aligned = True; break
+            
+            is_locked = link.is_base or link.parent_joint or is_aligned
+            
             ratio = self.canvas.grid_units_per_cm
             self.pick_x.setValue(link.pick_pos[0] / ratio)
             self.pick_y.setValue(link.pick_pos[1] / ratio)
@@ -255,6 +264,13 @@ class NavigationMixin:
             
             for sb in [self.pick_x, self.pick_y, self.pick_z, self.place_x, self.place_y, self.place_z]:
                 sb.blockSignals(False)
+                sb.setEnabled(not is_locked)
+                # Visual cue for locked status
+                if is_locked:
+                    sb.setStyleSheet("background: #f5f5f5; color: #9e9e9e; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; padding: 2px 4px; font-weight: bold;")
+                else:
+                    color = "#1976d2" if "pick" in str(sb.objectName()).lower() or sb == self.pick_x or sb == self.pick_y or sb == self.pick_z else "#388E3C"
+                    sb.setStyleSheet(f"background: white; color: {color}; border: 1px solid #ddd; border-radius: 4px; font-size: 12px; padding: 2px 4px; font-weight: bold;")
 
     def save_sim_object_coords(self):
         """Saves current spinbox values back to the selected simulation object."""
@@ -324,6 +340,16 @@ class NavigationMixin:
         obj_name = item.text()
         if obj_name not in self.robot.links: return
         obj_link = self.robot.links[obj_name]
+
+        # --- COMPLIANCE CHECK: Base, Aligned, or Jointed cannot be moved ---
+        is_aligned = False
+        if hasattr(self, 'alignment_cache'):
+            for (p, c), pt in self.alignment_cache.items():
+                if c == obj_name:
+                    is_aligned = True; break
+        
+        if obj_link.is_base or obj_link.parent_joint or is_aligned:
+            return
 
         # STATE A: We are NOT gripping, look for P1 (Pick)
         if not sim_tab.gripped_object:

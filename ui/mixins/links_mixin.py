@@ -98,6 +98,23 @@ class LinksMixin:
             
         link = self.robot.links[name]
         
+        # --- COMPLIANCE CHECK: Only un-constrained objects can become the Base ---
+        if self.robot.base_link != link:
+            is_aligned = False
+            if hasattr(self, 'alignment_cache'):
+                for (p, c), pt in self.alignment_cache.items():
+                    if c == name:
+                        is_aligned = True; break
+            
+            if link.parent_joint:
+                self.log(f"⚠️ Locked: '{name}' is jointed. Components with a parent joint cannot be set as the Base.")
+                QtWidgets.QMessageBox.warning(self, "Locked", f"'{name}' is part of a joint. Remove the joint before making it the Base.")
+                return
+            if is_aligned:
+                self.log(f"⚠️ Locked: '{name}' is aligned. Undo alignment before making it the Base.")
+                QtWidgets.QMessageBox.warning(self, "Locked", f"'{name}' is aligned to another component. Reset alignment first.")
+                return
+        
         # TOGGLE LOGIC: If it's already the base, unset it
         if self.robot.base_link == link:
             self.robot.base_link = None
