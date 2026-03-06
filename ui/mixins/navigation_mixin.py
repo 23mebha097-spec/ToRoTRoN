@@ -176,9 +176,7 @@ class NavigationMixin:
             self.save_btn.setEnabled(False)
             self.load_btn.setEnabled(False)
             
-            # Show Import Object button and Simulation Toggle
-            self.import_obj_btn.setVisible(True)
-            self.sim_toggle_icon.setVisible(True)
+            # Refresh Simulation Objects list
             self.refresh_sim_objects_list()
             
         else:
@@ -194,11 +192,6 @@ class NavigationMixin:
             # Enable controls
             self.save_btn.setEnabled(True)
             self.load_btn.setEnabled(True)
-            
-            # Hide Import Object button and Simulation Panel
-            self.import_obj_btn.setVisible(False)
-            self.sim_toggle_icon.setVisible(False)
-            self.sim_objects_panel.setVisible(False)
             
             # Remove any speed overlay from canvas
             self.canvas.plotter.remove_actor("speed_overlay")
@@ -278,19 +271,17 @@ class NavigationMixin:
             # self.log(f"Saved Pick/Place for {name}")
       
     def update_live_ui(self):
-        """Updates the Live Point (LP) coordinates based on the robot end effector."""
+        """Updates the Live Point (LP) coordinates and handles Pick-and-Place simulation logic."""
         if not hasattr(self, 'live_x'):
             return
             
         # 1. Identify leaf link (TCP)
-        # We look for a link that has a parent joint but no child joints
         tcp_link = None
         for link in self.robot.links.values():
             if link.parent_joint and not link.child_joints:
                 tcp_link = link
                 break
         
-        # fallback to the first link that isn't base if no clear leaf
         if not tcp_link:
             for link in self.robot.links.values():
                 if not link.is_base:
@@ -311,6 +302,81 @@ class NavigationMixin:
             self.live_x.blockSignals(False)
             self.live_y.blockSignals(False)
             self.live_z.blockSignals(False)
+
+            # 2. Pick-and-Place Simulation Logic (MAGNET MODE)
+            sim_tab = self.simulation_tab
+            if hasattr(sim_tab, 'is_sim_active') and sim_tab.is_sim_active:
+                self._handle_sim_pick_place(tcp_link, pos, ratio)
+
+    def _handle_sim_pick_place(self, tcp_link, tcp_pos, ratio):
+        """Monitors proximity to P1/P2 and manages object attachment."""
+        sim_tab = self.simulation_tab
+        
+        # P1 & P2 in World Coords
+        p1 = np.array([sim_tab.pick_x.value(), sim_tab.pick_y.value(), sim_tab.pick_z.value()]) * ratio
+        p2 = np.array([sim_tab.place_x.value(), sim_tab.place_y.value(), sim_tab.place_z.value()]) * ratio
+        
+        THRESHOLD = 2.0 * ratio # 2cm grab radius
+        
+        # Current selected object in the list
+        item = sim_tab.objects_list.currentItem()
+        if not item: return
+        obj_name = item.text()
+        if obj_name not in self.robot.links: return
+        obj_link = self.robot.links[obj_name]
+
+        # STATE A: We are NOT gripping, look for P1 (Pick)
+        if not sim_tab.gripped_object:
+            dist_p1 = np.linalg.norm(tcp_pos - p1)
+            if dist_p1 < THRESHOLD:
+                self.log(f"🧲 GRIPPED: {obj_name} at P1")
+                sim_tab.gripped_object = obj_name
+                # Store relative transform from TCP to Object
+                inv_tcp = np.linalg.inv(tcp_link.t_world)
+                sim_tab.grip_offset = inv_tcp @ obj_link.t_world
+                
+                # AUTO-CLOSE GRIPPER: Animate any joints with relations
+                self._control_gripper_fingers(close=True)
+                self.show_toast(f"Gripped {obj_name}", "success")
+
+        # STATE B: We ARE gripping, update object and look for P2 (Place)
+        else:
+            if sim_tab.gripped_object == obj_name:
+                # FOLLOW THE ROBOT
+                obj_link.t_offset = tcp_link.t_world @ sim_tab.grip_offset
+                # Important: update actor world pos immediately for feedback
+                self.canvas.update_transforms(self.robot)
+                
+                # Check for Place (P2)
+                dist_p2 = np.linalg.norm(tcp_pos - p2)
+                if dist_p2 < THRESHOLD:
+                     self.log(f"📦 PLACED: {obj_name} at P2")
+                     sim_tab.gripped_object = None
+                     sim_tab.grip_offset = None
+                     
+                     # AUTO-OPEN GRIPPER
+                     self._control_gripper_fingers(close=False)
+                     self.show_toast(f"Placed {obj_name}", "success")
+
+    def _control_gripper_fingers(self, close=True):
+        """Automatically moves joints that have relations (the 'gripper')."""
+        for j_name, joint in self.robot.joints.items():
+            # Check if this joint is a 'master' in a relation (likely a finger)
+            if j_name in self.robot.joint_relations:
+                # Simple logic: close = move toward max limit, open = move toward min
+                # You can customize this if you know specific gripper ranges
+                target = joint.max_limit if close else joint.min_limit
+                
+                # Note: We don't animate with time.sleep here because we are in the UI thread 
+                # inside a transform update. We just snap it for simulation clarity.
+                joint.current_value = target
+                # Also move slaves
+                for s_id, ratio in self.robot.joint_relations[j_name]:
+                    if s_id in self.robot.joints:
+                        self.robot.joints[s_id].current_value = target * ratio
+                        
+        self.robot.update_kinematics()
+        self.canvas.update_transforms(self.robot)
 
     def show_speed_overlay(self):
         """Displays current speed percentage on the 3D canvas temporarily"""

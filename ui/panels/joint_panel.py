@@ -1,6 +1,10 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
 import numpy as np
 
+class TypeOnlyDoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    def stepBy(self, steps): pass
+    def wheelEvent(self, event): event.ignore()
+
 class JointPanel(QtWidgets.QWidget):
     def __init__(self, main_window):
         super().__init__()
@@ -133,9 +137,10 @@ class JointPanel(QtWidgets.QWidget):
         min_label.setStyleSheet("color: #616161; font-size: 11px;")
         limits_row.addWidget(min_label)
         
-        self.min_limit_spin = QtWidgets.QDoubleSpinBox()
+        self.min_limit_spin = TypeOnlyDoubleSpinBox()
         self.min_limit_spin.setRange(-360, 360)
         self.min_limit_spin.setValue(-180)
+        self.min_limit_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.min_limit_spin.setStyleSheet("background-color: white; color: #212121; border: 1px solid #bbb; padding: 5px;")
         self.min_limit_spin.valueChanged.connect(self.update_slider_range)
         limits_row.addWidget(self.min_limit_spin)
@@ -144,9 +149,10 @@ class JointPanel(QtWidgets.QWidget):
         max_label.setStyleSheet("color: #616161; font-size: 11px;")
         limits_row.addWidget(max_label)
         
-        self.max_limit_spin = QtWidgets.QDoubleSpinBox()
+        self.max_limit_spin = TypeOnlyDoubleSpinBox()
         self.max_limit_spin.setRange(-360, 360)
         self.max_limit_spin.setValue(180)
+        self.max_limit_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.max_limit_spin.setStyleSheet("background-color: white; color: #212121; border: 1px solid #bbb; padding: 5px;")
         self.max_limit_spin.valueChanged.connect(self.update_slider_range)
         limits_row.addWidget(self.max_limit_spin)
@@ -191,12 +197,13 @@ class JointPanel(QtWidgets.QWidget):
         slider_row.addWidget(self.rotation_slider)
         
         # Direct angle input spinbox
-        self.rotation_spinbox = QtWidgets.QDoubleSpinBox()
+        self.rotation_spinbox = TypeOnlyDoubleSpinBox()
         self.rotation_spinbox.setRange(-180, 180)
         self.rotation_spinbox.setValue(0)
         self.rotation_spinbox.setSuffix("°")
         self.rotation_spinbox.setDecimals(1)
         self.rotation_spinbox.setFixedWidth(70)
+        self.rotation_spinbox.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.rotation_spinbox.setStyleSheet("""
             QDoubleSpinBox {
                 background: white;
@@ -367,10 +374,11 @@ class JointPanel(QtWidgets.QWidget):
         self.joint_control_slider.valueChanged.connect(self.on_joint_control_changed)
         jc_slider_row.addWidget(self.joint_control_slider)
         
-        self.joint_control_spinbox = QtWidgets.QDoubleSpinBox()
+        self.joint_control_spinbox = TypeOnlyDoubleSpinBox()
         self.joint_control_spinbox.setSuffix("°")
         self.joint_control_spinbox.setDecimals(1)
         self.joint_control_spinbox.setFixedWidth(70)
+        self.joint_control_spinbox.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.joint_control_spinbox.setStyleSheet("""
             QDoubleSpinBox {
                 background: white;
@@ -675,11 +683,12 @@ class JointPanel(QtWidgets.QWidget):
         for display_name, j_id, c_name in other_joints:
             row = QtWidgets.QHBoxLayout()
             cb = QtWidgets.QCheckBox(display_name)
-            ratio_spin = QtWidgets.QDoubleSpinBox()
+            ratio_spin = TypeOnlyDoubleSpinBox()
             ratio_spin.setRange(-10, 10)
             ratio_spin.setValue(1.0)
             ratio_spin.setSingleStep(0.1)
             ratio_spin.setFixedWidth(60)
+            ratio_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
             
             # Check if relation already exists
             existing_ratio = None

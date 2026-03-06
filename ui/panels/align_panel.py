@@ -1,6 +1,10 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
 import numpy as np
 
+class TypeOnlyDoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    def stepBy(self, steps): pass
+    def wheelEvent(self, event): event.ignore()
+
 class AlignPanel(QtWidgets.QWidget):
     def __init__(self, main_window):
         super().__init__()
@@ -124,11 +128,12 @@ class AlignPanel(QtWidgets.QWidget):
                 }
             """)
             
-            spin = QtWidgets.QDoubleSpinBox()
+            spin = TypeOnlyDoubleSpinBox()
             spin.setRange(-180, 180)
             spin.setDecimals(1)
             spin.setValue(0)
             spin.setFixedWidth(70)
+            spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
             spin.setStyleSheet("""
                 QDoubleSpinBox {
                     background: white;
