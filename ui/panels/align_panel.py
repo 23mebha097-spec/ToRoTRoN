@@ -2,6 +2,8 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 import numpy as np
 
 class TypeOnlyDoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
     def stepBy(self, steps): pass
     def wheelEvent(self, event): event.ignore()
 
@@ -130,7 +132,6 @@ class AlignPanel(QtWidgets.QWidget):
             
             spin = TypeOnlyDoubleSpinBox()
             spin.setRange(-180, 180)
-            spin.setDecimals(1)
             spin.setValue(0)
             spin.setFixedWidth(70)
             spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)

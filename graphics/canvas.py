@@ -22,7 +22,7 @@ class RobotCanvas(QtWidgets.QWidget):
         # Customizable Simulation Scale
         # Default: 10 units (mm) in CAD file = 1.0 unit (cm) in Graph labels
         self.grid_units_per_cm = 10.0 
-        self.grid_cm_size = 100.0     # Default 100cm workspace
+        self.grid_cm_size = 1000.0    # Reduced to 1000cm (10m) workspace
         
         # Custom dynamic grid system (3D Graph)
         self._init_custom_grids()
@@ -51,7 +51,8 @@ class RobotCanvas(QtWidgets.QWidget):
         self.fixed_actors = set() # Set of actor names that cannot be picked or moved
        
         # WE DISABLE PyVista's built-in picking to avoid conflicts
-        # Instead, we will use a dedicated vtkCellPicker for surgical precision
+        # Instead, we will use dedicated vtk pickers for surgical precision
+        self.picker = vtkRenderingCore.vtkPropPicker()
         self.cell_picker = vtkRenderingCore.vtkCellPicker()
         self.cell_picker.SetTolerance(0.0005)
         
@@ -453,8 +454,8 @@ class RobotCanvas(QtWidgets.QWidget):
         self.mw_log("Double-click detected!")  # Debug
         
         click_pos = self.plotter.interactor.GetEventPosition()
-        self.plotter.picker.Pick(click_pos[0], click_pos[1], 0, self.plotter.renderer)
-        actor = self.plotter.picker.GetActor()
+        self.picker.Pick(click_pos[0], click_pos[1], 0, self.plotter.renderer)
+        actor = self.picker.GetActor()
         
         if actor:
             # Find the name of the clicked actor
@@ -552,8 +553,8 @@ class RobotCanvas(QtWidgets.QWidget):
             current_time = time.time()
             
             # Pick the actor
-            self.plotter.picker.Pick(click_pos[0], click_pos[1], 0, self.plotter.renderer)
-            actor = self.plotter.picker.GetActor()
+            self.picker.Pick(click_pos[0], click_pos[1], 0, self.plotter.renderer)
+            actor = self.picker.GetActor()
             
             # Check if this is a double-click (within 300ms of last click on same actor)
             if hasattr(self, '_last_click_time') and hasattr(self, '_last_click_actor'):
@@ -585,8 +586,8 @@ class RobotCanvas(QtWidgets.QWidget):
         
         # --- OBJECT PICKING MODE (JOINT PARENT/CHILD) ---
         if hasattr(self, 'picking_object') and self.picking_object:
-            self.plotter.picker.Pick(click_pos[0], click_pos[1], 0, self.plotter.renderer)
-            actor = self.plotter.picker.GetActor()
+            self.picker.Pick(click_pos[0], click_pos[1], 0, self.plotter.renderer)
+            actor = self.picker.GetActor()
             
             if actor:
                 # Find the name of the clicked actor
@@ -605,8 +606,8 @@ class RobotCanvas(QtWidgets.QWidget):
         
         # --- POINT PICKING MODE (JOINT ORIGIN) ---
         if hasattr(self, 'picking_point') and self.picking_point:
-            self.plotter.picker.Pick(click_pos[0], click_pos[1], 0, self.plotter.renderer)
-            picked_pos = self.plotter.picker.GetPickPosition()
+            self.picker.Pick(click_pos[0], click_pos[1], 0, self.plotter.renderer)
+            picked_pos = self.picker.GetPickPosition()
             
             # Use picked position (even if on grid/empty space, though usually on object)
             if self.on_point_picked_callback:
@@ -643,8 +644,8 @@ class RobotCanvas(QtWidgets.QWidget):
                 return
         
         # Check if we hit an actor
-        self.plotter.picker.Pick(click_pos[0], click_pos[1], 0, self.plotter.renderer)
-        actor = self.plotter.picker.GetActor()
+        self.picker.Pick(click_pos[0], click_pos[1], 0, self.plotter.renderer)
+        actor = self.picker.GetActor()
 
         # CASE 1: We are already dragging something
         if self.is_dragging:
@@ -685,6 +686,10 @@ class RobotCanvas(QtWidgets.QWidget):
             # In simulation mode, we only allow moving "simulation objects"
             # (objects imported while in simulation mode).
             if hasattr(self.window(), 'sim_toggle_btn') and self.window().sim_toggle_btn.isChecked():
+                if clicked_name is None:
+                    self.plotter.interactor.GetInteractorStyle().OnLeftButtonDown()
+                    return
+                    
                 link = None
                 if clicked_name in self.window().robot.links:
                     link = self.window().robot.links[clicked_name]
@@ -1052,7 +1057,8 @@ class RobotCanvas(QtWidgets.QWidget):
         self.grids = {}
         # Dynamic size: grid_cm_size * units_per_cm
         size = self.grid_cm_size * self.grid_units_per_cm
-        res = int(self.grid_cm_size) # 1 line per CM
+        # Performance Cap: Avoid GPU freeze on massive scales
+        res = min(int(self.grid_cm_size), 500) 
         
         # 1. XY Grid (Bottom/Top) - Blueish tint
         xy_mesh = pv.Plane(center=(0, 0, 0), direction=(0, 0, 1), i_size=size, j_size=size, i_resolution=res, j_resolution=res)
@@ -1084,12 +1090,18 @@ class RobotCanvas(QtWidgets.QWidget):
         self._axis_labels = []  # List of {'actor', 'val', 'grid', 'axis'}
         self._center_axis_actors = {}  # Grid key -> list of line actors
         
-        # Dynamic half-size based on workspace size
+        # Dynamic half-size and offset
         half = (self.grid_cm_size / 2.0) * self.grid_units_per_cm
         offset = self.grid_units_per_cm * 0.5  # Label offset
-        
-        # Calculate dynamic ticks: Label every 5cm
-        cm_interval = 5.0
+
+        # Calculate dynamic ticks relative to workspace size
+        if self.grid_cm_size > 10000:
+            cm_interval = self.grid_cm_size / 20.0  # Target ~20 labels per axis for massive scales
+        elif self.grid_cm_size > 100:
+            cm_interval = 10.0  # Show label every 10cm for standard workspaces
+        else:
+            cm_interval = 1.0   # 1cm for precision views
+            
         unit_interval = cm_interval * self.grid_units_per_cm
         ticks = [i for i in np.arange(-half, half + 1.0, unit_interval) if abs(i) > 1e-6]
         
@@ -1211,18 +1223,21 @@ class RobotCanvas(QtWidgets.QWidget):
         if not hasattr(self, '_axis_labels'):
             return
         
-        # Camera distance for tick density
+        # Camera distance in CM for zoom logic
         cam_pos = np.array(self.plotter.camera.position)
         focal = np.array(self.plotter.camera.focal_point)
         cam_dist = np.linalg.norm(cam_pos - focal)
+        cam_dist_cm = cam_dist / self.grid_units_per_cm
         
-        # Tick spacing: closer = show every 1, medium = every 2, far = every 5
-        if cam_dist < 10:
-            spacing = 1
-        elif cam_dist < 20:
-            spacing = 2
-        else:
-            spacing = 5
+        # Dynamic label granularity based on zoom (Requested: 10cm close, 50cm far)
+        if cam_dist_cm < 150:     # Within 1.5 meters: Show every 10cm
+            target_step_cm = 10
+        elif cam_dist_cm < 500:   # Within 5 meters: Show every 50cm
+            target_step_cm = 50
+        elif cam_dist_cm < 1500:  # Within 15 meters: Show every 100cm (1m)
+            target_step_cm = 100
+        else:                     # Massive view: Show every 500cm (5m)
+            target_step_cm = 500
         
         # Which grids are visible (snapped view detection)
         direction = focal - cam_pos
@@ -1236,7 +1251,6 @@ class RobotCanvas(QtWidgets.QWidget):
         show_xy = abs_dir[2] > tol
         show_xz = abs_dir[1] > tol
         show_yz = abs_dir[0] > tol
-        is_snapped = show_xy or show_xz or show_yz
         
         grid_vis = {
             'xy': True,  # XY grid is always visible (default ground plane)
@@ -1253,8 +1267,12 @@ class RobotCanvas(QtWidgets.QWidget):
         
         # Update label visibility
         for lbl in self._axis_labels:
+            # Calculate actual CM value for this label
+            cm_val = round(abs(lbl['val'] / self.grid_units_per_cm))
+            
             gv = bool(grid_vis.get(lbl['grid'], False))
-            tv = (abs(lbl['val']) % spacing) == 0 if spacing > 1 else True
+            # Visibility condition: matches target step and grid is visible
+            tv = (cm_val % target_step_cm) == 0
             lbl['actor'].SetVisibility(bool(gv and tv))
 
     def _on_camera_change(self, *args):

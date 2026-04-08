@@ -17,6 +17,7 @@ class Link:
         
         self.parent_joint = None
         self.child_joints = []
+        self.custom_tcp_offset = None # Optional [x, y, z] relative to link frame (Live Point)
 
 class Joint:
     def __init__(self, name, parent_link, child_link, joint_type="revolute"):
@@ -24,6 +25,7 @@ class Joint:
         self.parent_link = parent_link
         self.child_link = child_link
         self.joint_type = joint_type
+        self.is_gripper = False
         
         self.origin = np.array([0.0, 0.0, 0.0]) # Relative to parent link frame
         self.axis = np.array([0.0, 0.0, 1.0])   # Unit vector
@@ -55,16 +57,24 @@ class Joint:
         return T_o @ R @ T_no
 
     def _rotation_matrix(self, axis, theta):
-        # Rodrigues' formula or standard axis-angle
+        """Standard Rodrigues' Rotation Formula (Library-Grade Stability)"""
+        axis = np.array(axis)
         axis = axis / (np.linalg.norm(axis) + 1e-9)
-        a = np.cos(theta / 2.0)
-        b, c, d = -axis * np.sin(theta / 2.0)
-        aa, bb, cc, dd = a * a, b * b, c * c, d * d
-        bc, ad, ac, ab, bd, cd = b * c, a * d, a * c, a * b, b * d, c * d
-        return np.array([[aa + bb - cc - dd, 2 * (bc + ad), 2 * (bd - ac), 0],
-                         [2 * (bc - ad), aa + cc - bb - dd, 2 * (cd + ab), 0],
-                         [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc, 0],
-                         [0, 0, 0, 1]])
+        
+        # Cross-product matrix (Skew-symmetric)
+        K = np.array([
+            [0, -axis[2], axis[1]],
+            [axis[2], 0, -axis[0]],
+            [-axis[1], axis[0], 0]
+        ])
+        
+        # R = I + sin(theta)K + (1-cos(theta))K^2
+        I = np.eye(3)
+        R = I + np.sin(theta) * K + (1 - np.cos(theta)) * np.dot(K, K)
+        
+        ret = np.eye(4)
+        ret[:3, :3] = R
+        return ret
 
 class Robot:
     def __init__(self):
@@ -195,3 +205,164 @@ class Robot:
                     
                     visited.add(child.name)
                     stack.append(child)
+
+    def get_kinematic_chain(self, tcp_link):
+        """Returns the list of joints from the root to the TCP link, excluding slaves."""
+        chain = []
+        curr = tcp_link
+        while curr.parent_joint is not None:
+            # Skip slave joints
+            is_slave = False
+            for master, slaves in self.joint_relations.items():
+                if any(s_id == curr.parent_joint.name for s_id, r in slaves):
+                    is_slave = True
+                    break
+            if not is_slave:
+                chain.append(curr.parent_joint)
+            curr = curr.parent_joint.parent_link
+        return list(reversed(chain))
+
+    def inverse_kinematics(self, target_pos, tcp_link, max_iters=300, tolerance=0.3, tool_offset=None):
+        """
+        Robust multi-pass Cyclic Coordinate Descent (CCD) IK solver.
+
+        Algorithm improvements over basic CCD:
+        1. Multi-pass: More iterations for higher accuracy.
+        2. Adaptive damping: Larger steps far from target, smaller near it.
+        3. Multi-restart: If stuck in a local minimum, perturb joints and retry.
+        4. Progressive tolerance: Tries to converge tightly.
+        5. Joint-limit enforcement: Clamps all joints throughout.
+        """
+        target = np.array(target_pos, dtype=float)
+        t_off = np.array(tool_offset, dtype=float) if tool_offset is not None else np.zeros(3)
+
+        # --- Build kinematic chain (root->TCP, skip slave joints) ---
+        chain = []
+        curr = tcp_link
+        while curr.parent_joint is not None:
+            is_slave = any(
+                any(s_id == curr.parent_joint.name for s_id, _ in slaves)
+                for _, slaves in self.joint_relations.items()
+            )
+            if not is_slave:
+                chain.append(curr.parent_joint)
+            curr = curr.parent_joint.parent_link
+        chain.reverse()  # Root -> TCP order
+
+        if not chain:
+            return False
+
+        def _get_tcp_world():
+            self.update_kinematics()
+            return (tcp_link.t_world @ np.append(t_off, 1.0))[:3]
+
+        def _apply_joint(joint, delta_deg):
+            """Apply a delta angle to a joint and propagate to slaves."""
+            new_val = np.clip(joint.current_value + delta_deg, joint.min_limit, joint.max_limit)
+            joint.current_value = new_val
+            if joint.name in self.joint_relations:
+                for s_id, ratio in self.joint_relations[joint.name]:
+                    if s_id in self.joints:
+                        self.joints[s_id].current_value = np.clip(
+                            new_val * ratio,
+                            self.joints[s_id].min_limit,
+                            self.joints[s_id].max_limit
+                        )
+            self.update_kinematics()
+
+        def _ccd_pass():
+            """One full CCD sweep (root -> TCP order for best convergence)."""
+            for joint in chain:
+                parent = joint.parent_link
+                pivot_w = (parent.t_world @ np.array([*joint.origin, 1.0]))[:3]
+                axis_w  = parent.t_world[:3, :3] @ joint.axis
+                axis_w /= (np.linalg.norm(axis_w) + 1e-9)
+
+                tcp_w = _get_tcp_world()
+                v_tool   = tcp_w   - pivot_w
+                v_target = target  - pivot_w
+
+                # Project onto the rotation plane perpendicular to the joint axis
+                vt_proj = v_tool   - np.dot(v_tool,   axis_w) * axis_w
+                vg_proj = v_target - np.dot(v_target, axis_w) * axis_w
+
+                nt, ng = np.linalg.norm(vt_proj), np.linalg.norm(vg_proj)
+                if nt < 1e-5 or ng < 1e-5:
+                    continue
+
+                u1 = vt_proj / nt
+                u2 = vg_proj / ng
+
+                cos_a = np.clip(np.dot(u1, u2), -1.0, 1.0)
+                sin_a = np.dot(axis_w, np.cross(u1, u2))
+                delta_deg = np.degrees(np.arctan2(sin_a, cos_a))
+
+                # Adaptive damping:
+                # - Close to target  → small cautious step (max 5°)
+                # - Far from target  → larger step (max 30°)
+                dist = np.linalg.norm(target - tcp_w)
+                if dist < 5.0:
+                    max_step = 2.0
+                    damp     = 0.3
+                elif dist < 20.0:
+                    max_step = 10.0
+                    damp     = 0.5
+                else:
+                    max_step = 30.0
+                    damp     = 0.8
+
+                delta_deg = np.clip(delta_deg * damp, -max_step, max_step)
+                _apply_joint(joint, delta_deg)
+
+        # --- Snapshot initial state for multi-restart ---
+        initial_vals = {j.name: j.current_value for j in chain}
+        best_vals    = dict(initial_vals)
+        best_dist    = np.linalg.norm(target - _get_tcp_world())
+
+        # --- Main solving loop with restarts ---
+        NUM_RESTARTS   = 4
+        ITERS_PER_RUN  = max_iters // (NUM_RESTARTS + 1)
+
+        for restart in range(NUM_RESTARTS + 1):
+            # --- For restart > 0: perturb joint angles to escape local minima ---
+            if restart > 0:
+                rng = np.random.RandomState(seed=restart * 42)
+                for j in chain:
+                    span    = j.max_limit - j.min_limit
+                    perturb = rng.uniform(-span * 0.25, span * 0.25)
+                    j.current_value = np.clip(
+                        best_vals[j.name] + perturb, j.min_limit, j.max_limit
+                    )
+                self.update_kinematics()
+
+            for _ in range(ITERS_PER_RUN):
+                _ccd_pass()
+                dist = np.linalg.norm(target - _get_tcp_world())
+
+                # Track best solution across all restarts
+                if dist < best_dist:
+                    best_dist  = dist
+                    best_vals  = {j.name: j.current_value for j in chain}
+
+                if dist < tolerance:
+                    # Apply best and finish
+                    for j in chain:
+                        j.current_value = best_vals[j.name]
+                    self.update_kinematics()
+                    return True
+
+        # --- Apply the globally best configuration found ---
+        for j in chain:
+            j.current_value = best_vals[j.name]
+        # Propagate slave joints for best config
+        for j in chain:
+            if j.name in self.joint_relations:
+                for s_id, ratio in self.joint_relations[j.name]:
+                    if s_id in self.joints:
+                        self.joints[s_id].current_value = np.clip(
+                            j.current_value * ratio,
+                            self.joints[s_id].min_limit,
+                            self.joints[s_id].max_limit
+                        )
+        self.update_kinematics()
+        return best_dist < tolerance

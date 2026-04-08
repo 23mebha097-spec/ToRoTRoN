@@ -60,7 +60,10 @@ class ProjectMixin:
                         "mesh_file": f"meshes/{mesh_filename}",
                         "color": link.color,
                         "is_base": link.is_base,
-                        "t_offset": link.t_offset.tolist()
+                        "t_offset": link.t_offset.tolist(),
+                        "is_sim_obj": getattr(link, "is_sim_obj", False),
+                        "pick_pos": list(getattr(link, "pick_pos", [0.0, 0.0, 0.0])),
+                        "place_pos": list(getattr(link, "place_pos", [0.0, 0.0, 0.0]))
                     })
 
                 # 2. Gather Joints (Robot Core)
@@ -196,6 +199,9 @@ class ProjectMixin:
                     link.color = l_data.get("color", "lightgray")
                     link.is_base = l_data.get("is_base", False)
                     link.t_offset = np.array(l_data["t_offset"])
+                    link.is_sim_obj = l_data.get("is_sim_obj", False)
+                    link.pick_pos = l_data.get("pick_pos", [0.0, 0.0, 0.0])
+                    link.place_pos = l_data.get("place_pos", [0.0, 0.0, 0.0])
                     
                     if link.is_base:
                         self.robot.base_link = link
@@ -255,6 +261,20 @@ class ProjectMixin:
                     if "|||" in key:
                         p, c = key.split("|||")
                         self.alignment_cache[(p, c)] = np.array(pt)
+
+                # VERY IMPORTANT: Restore the UI Joint panels and re-render visual joints
+                if hasattr(self, 'joint_tab'):
+                    # Clear out arrows first
+                    arrow_names = [a for a in self.canvas.actors.keys() if a.startswith("joint_axis_")]
+                    for aname in arrow_names:
+                        self.canvas.remove_actor(aname)
+                        
+                    # Rebuild 3D arrows for all joints by syncing the UI state
+                    for child_name, data in self.joint_tab.joints.items():
+                        # Using show_joint_control ensures radio buttons and labels match the loaded data
+                        self.joint_tab.show_joint_control(child_name)
+                        
+                    self.joint_tab.active_joint_control = None # Unselect
 
                 # Restore Speed
                 if "current_speed" in ui_state:

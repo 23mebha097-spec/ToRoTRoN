@@ -357,6 +357,31 @@ class LinksMixin:
                 # Refresh Simulation Objects list if needed
                 if getattr(link, 'is_sim_obj', False):
                     self.refresh_sim_objects_list()
+                    
+                    # --- AUTO-SELECT and AUTO-POPULATE DIM on import ---
+                    # Find and select the newly-imported item in the sim objects list
+                    sim_list = self.simulation_tab.objects_list
+                    for i in range(sim_list.count()):
+                        item_i = sim_list.item(i)
+                        if item_i and item_i.text() == name:
+                            sim_list.setCurrentItem(item_i)
+                            break
+                    
+                    # Populate DIM fields and object info immediately
+                    self.simulation_tab.refresh_object_info(name)
+                    
+                    # --- INDUSTRIAL READINESS: Auto-capture P1 and set P2 ---
+                    # 1. Capture current bottom-center as P1
+                    self.simulation_tab.capture_object_to_p1()
+                    
+                    # 2. Set default P2 (e.g., 20cm away in Y axis)
+                    p1_y = self.simulation_tab.pick_y.value()
+                    self.simulation_tab.place_x.setValue(self.simulation_tab.pick_x.value())
+                    self.simulation_tab.place_y.setValue(p1_y + 20.0) # Move 20cm north
+                    self.simulation_tab.place_z.setValue(0.0) # Place at floor
+                    
+                    self.log(f"📐 System Ready: Dimensions and P1/P2 auto-populated for '{name}'.")
+                    self.show_toast(f"Robot ready to pick {name}", "success")
                 
             except ImportError as ie:
                 self.log(f"MISSING DEPENDENCY: {str(ie)}")

@@ -2,6 +2,8 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 import numpy as np
 
 class TypeOnlyDoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
     def stepBy(self, steps): pass
     def wheelEvent(self, event): event.ignore()
 
@@ -94,6 +96,38 @@ class JointPanel(QtWidgets.QWidget):
         """)
         name_layout.addWidget(self.joint_name_input)
         rot_layout.addLayout(name_layout)
+        
+        # --- NEW: Industrial Gripper Option ---
+        gripper_row = QtWidgets.QHBoxLayout()
+        self.gripper_checkbox = QtWidgets.QCheckBox("Gripper Joint")
+        self.gripper_checkbox.setToolTip("Mark this joint as an industrial gripper for Pick and Place logic")
+        self.gripper_checkbox.setStyleSheet("color: #2e7d32; font-weight: bold; font-size: 13px;")
+        gripper_row.addWidget(self.gripper_checkbox)
+        
+        self.set_lp_btn = QtWidgets.QPushButton("🎯 Set Live Point")
+        self.set_lp_btn.setFixedWidth(140)
+        self.set_lp_btn.setVisible(False)
+        self.set_lp_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.set_lp_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                color: #d32f2f;
+                border: 2px solid #d32f2f;
+                border-radius: 4px;
+                padding: 4px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover { background-color: #ffebee; }
+        """)
+        self.set_lp_btn.clicked.connect(self.on_set_live_point)
+        gripper_row.addWidget(self.set_lp_btn)
+        gripper_row.addStretch()
+        rot_layout.addLayout(gripper_row)
+        
+        # Toggle button visibility
+        self.gripper_checkbox.toggled.connect(self.set_lp_btn.setVisible)
+        self.gripper_checkbox.toggled.connect(self.on_gripper_toggle_sync)
         
         # Axis selection
         axis_label = QtWidgets.QLabel("Select rotation axis:")
@@ -201,7 +235,6 @@ class JointPanel(QtWidgets.QWidget):
         self.rotation_spinbox.setRange(-180, 180)
         self.rotation_spinbox.setValue(0)
         self.rotation_spinbox.setSuffix("°")
-        self.rotation_spinbox.setDecimals(1)
         self.rotation_spinbox.setFixedWidth(70)
         self.rotation_spinbox.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.rotation_spinbox.setStyleSheet("""
@@ -376,7 +409,6 @@ class JointPanel(QtWidgets.QWidget):
         
         self.joint_control_spinbox = TypeOnlyDoubleSpinBox()
         self.joint_control_spinbox.setSuffix("°")
-        self.joint_control_spinbox.setDecimals(1)
         self.joint_control_spinbox.setFixedWidth(70)
         self.joint_control_spinbox.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
         self.joint_control_spinbox.setStyleSheet("""
@@ -737,6 +769,30 @@ class JointPanel(QtWidgets.QWidget):
                 self.mw.matrices_tab.refresh_sliders()
                 self.mw.matrices_tab.update_display()
 
+    def on_gripper_toggle_sync(self, checked):
+        """Sync the gripper status to the Gripper tab."""
+        if not self.selected_object: return
+        
+        # Find the joint associated with this object
+        joint_name = None
+        for jn, j in self.mw.robot.joints.items():
+            if j.child_link.name == self.selected_object:
+                joint_name = jn
+                break
+        
+        if joint_name:
+            self.mw.robot.joints[joint_name].is_gripper = checked
+            # Refresh Gripper Tab list if visible
+            if hasattr(self.mw, 'gripper_tab'):
+                self.mw.gripper_tab.refresh_joints()
+                # If the gripper tab is currently selecting this joint, sync its checkbox
+                items = self.mw.gripper_tab.joints_list.findItems(joint_name, QtCore.Qt.MatchExactly)
+                if items:
+                    self.mw.gripper_tab.joints_list.setCurrentItem(items[0])
+                    self.mw.gripper_tab.mark_gripper_check.blockSignals(True)
+                    self.mw.gripper_tab.mark_gripper_check.setChecked(checked)
+                    self.mw.gripper_tab.mark_gripper_check.blockSignals(False)
+
     def select_object(self, name):
         """Selection logic for external calls"""
         self.selected_object = name
@@ -875,19 +931,39 @@ class JointPanel(QtWidgets.QWidget):
             self.mw.log(f"Selected: {self.selected_object}")
 
     def show_joint_control(self, object_name):
-        """Show joint control section for a jointed object"""
+        """Show joint control section for a jointed object and sync UI widgets."""
         self.active_joint_control = object_name
         joint_data = self.joints[object_name]
         
-        # Update info label
+        # 1. Sync Axis Selection from metadata
+        self.axis_group.blockSignals(True)
+        # Use saved index if available, otherwise default to Z (2)
+        axis_id = joint_data.get('axis', 2)
+        if axis_id == 0: self.axis_x_radio.setChecked(True)
+        elif axis_id == 1: self.axis_y_radio.setChecked(True)
+        else: self.axis_z_radio.setChecked(True)
+        self.axis_group.blockSignals(False)
+
+        # 2. Sync Limits & Name
+        self.min_limit_spin.blockSignals(True)
+        self.min_limit_spin.setValue(joint_data.get('min', -180))
+        self.min_limit_spin.blockSignals(False)
+        
+        self.max_limit_spin.blockSignals(True)
+        self.max_limit_spin.setValue(joint_data.get('max', 180))
+        self.max_limit_spin.blockSignals(False)
+        
+        self.joint_name_input.setText(joint_data.get('custom_name', object_name))
+
+        # 3. Update info label
         axis_names = {0: "X", 1: "Y", 2: "Z"}
-        axis_name = axis_names.get(joint_data['axis'], "?")
+        axis_name = axis_names.get(axis_id, "?")
         custom_name = joint_data.get('custom_name', object_name)
         self.joint_info_label.setText(
             f"Joint: {custom_name} | Axis: {axis_name}"
         )
         
-        # Setup slider
+        # 4. Setup Control Slider (Section 4)
         min_val = int(joint_data['min'] * 10)
         max_val = int(joint_data['max'] * 10)
         current_val = int(joint_data['current_angle'] * 10)
@@ -902,8 +978,28 @@ class JointPanel(QtWidgets.QWidget):
         self.joint_control_spinbox.setValue(joint_data['current_angle'])
         self.joint_control_spinbox.blockSignals(False)
         
-        # Show section
+        # Support Gripper state
+        self.gripper_checkbox.blockSignals(True)
+        self.gripper_checkbox.setChecked(joint_data.get('is_gripper', False))
+        self.gripper_checkbox.blockSignals(False)
+        self.set_lp_btn.setVisible(self.gripper_checkbox.isChecked())
+        
+        # 5. Visual Indicators
+        self.alignment_point = joint_data.get('alignment_point')
+        self.rotation_section.setVisible(True) # Show section 3 so user can see/edit axis
         self.joint_control_section.setVisible(True)
+        
+        # Determine parent for coordination
+        self.parent_object = joint_data.get('parent')
+        self.child_object = object_name
+        
+        # Initialize original transform for rotation math (offset * parent)
+        # This prevents AttributeError and handles editing existing joints
+        child_link = self.mw.robot.links[object_name]
+        parent_link = self.mw.robot.links[self.parent_object]
+        self.original_child_transform = parent_link.t_world @ child_link.t_offset
+        
+        self.show_joint_arrow()
         self.mw.log(f"Joint control active for: {object_name}")
 
     def create_joint(self):
@@ -1037,16 +1133,16 @@ class JointPanel(QtWidgets.QWidget):
         world_axis = R_p @ local_axis
         
         # --- SHOW RGB TRIAD (Local Parent Axes) ---
-        triad_length = 0.5
-        for i, color in enumerate(["red", "green", "blue"]):
-            l_ax = np.zeros(3); l_ax[i] = 1
-            w_ax = R_p @ l_ax
-            line = pv.Line(self.alignment_point, self.alignment_point + w_ax * triad_length)
-            self.mw.canvas.plotter.add_mesh(line, color=color, line_width=4, name=f"joint_triad_{'xyz'[i]}", pickable=False)
+        # triad_length = 0.5
+        # for i, color in enumerate(["red", "green", "blue"]):
+        #     l_ax = np.zeros(3); l_ax[i] = 1
+        #     w_ax = R_p @ l_ax
+        #     line = pv.Line(self.alignment_point, self.alignment_point + w_ax * triad_length)
+        #     self.mw.canvas.plotter.add_mesh(line, color=color, line_width=4, name=f"joint_triad_{'xyz'[i]}", pickable=False)
 
         # --- SHOW MAIN JOINT ARROW (Yellow) ---
-        arrow = pv.Arrow(start=self.alignment_point, direction=world_axis, scale=0.8)
-        self.mw.canvas.plotter.add_mesh(arrow, color="yellow", name="joint_arrow", pickable=False)
+        # arrow = pv.Arrow(start=self.alignment_point, direction=world_axis, scale=0.8)
+        # self.mw.canvas.plotter.add_mesh(arrow, color="yellow", name="joint_arrow", pickable=False)
         self.mw.canvas.plotter.render()
 
     def confirm_joint(self):
@@ -1094,11 +1190,13 @@ class JointPanel(QtWidgets.QWidget):
         pivot_local = (t_parent_inv @ np.append(self.alignment_point, 1))[:3]
         joint.origin = pivot_local
         
-        # Set Axis (X, Y, or Z) - transformed to parent frame
+        # Set Axis (X, Y, or Z) - Store as local unit vector in parent frame
         axis_vecs = [np.array([1,0,0]), np.array([0,1,0]), np.array([0,0,1])]
-        # Convert global axis choice to parent local rotation axis
-        # (Assuming the initial alignment made parent and child axes parallel to global)
-        joint.axis = axis_vecs[axis]
+        
+        # DH COMPLIANCE: In industrial robotics, the rotation axis is the frame axis.
+        # We store the local vector so it survives parent re-orientation.
+        local_axis_vec = axis_vecs[axis]
+        joint.axis = local_axis_vec
         
         # Set Child Static Offset (relative to parent at 0 degrees)
         # Math: Child_Offset = inv(Parent_World) * Original_Aligned_Child_World
@@ -1110,20 +1208,32 @@ class JointPanel(QtWidgets.QWidget):
         joint.max_limit = max_limit
         joint.current_value = 0.0
         
+        # Calculate and Store the current WORLD axis for verification and DH tracking
+        world_axis_vec = parent_link.t_world[:3, :3] @ local_axis_vec
+
         # --- 2. LOCAL STORAGE AND LOGGING ---
-        # Store for UI tracking
+        # Store for UI tracking and Persistence
         self.joints[self.child_object] = {
             'parent': self.parent_object,
-            'axis': axis,
+            'axis': axis, # Selection index (X=0, Y=1, Z=2)
+            'local_axis_vector': local_axis_vec.tolist(),
+            'world_axis_vector': world_axis_vec.tolist(),
             'min': min_limit,
             'max': max_limit,
             'current_angle': 0.0,
-            'alignment_point': self.alignment_point.copy(),
+            'alignment_point': self.alignment_point.tolist() if isinstance(self.alignment_point, np.ndarray) else self.alignment_point,
             'custom_name': custom_name,
-            'joint_id': joint_id
+            'joint_id': joint_id,
+            'is_gripper': self.gripper_checkbox.isChecked()
         }
+        # Update robot model class
+        joint.is_gripper = self.gripper_checkbox.isChecked()
+        
+        ratio = self.mw.canvas.grid_units_per_cm
+        pivot_cm = pivot_local / ratio
         
         self.mw.log(f"Joint confirmed and added to Robot model (ID: {joint_id})")
+        self.mw.log(f"  Pivot (CM):  X: {pivot_cm[0]:.3f}, Y: {pivot_cm[1]:.3f}, Z: {pivot_cm[2]:.3f}")
         
         # --- 3. AUTO-APPEND TO CODE EDITOR ---
         if hasattr(self.mw, 'program_tab'):
@@ -1230,33 +1340,51 @@ class JointPanel(QtWidgets.QWidget):
             if hasattr(self.mw, 'update_live_ui'):
                 self.mw.update_live_ui()
 
-            # 8. Propagate to related joints
+            # 8. Propagate to related joints (Bidirectional Coupling)
             joint_id = self.joints[child_name].get('joint_id', child_name)
-            if joint_id in self.mw.robot.joint_relations:
-                for slave_id, ratio in self.mw.robot.joint_relations[joint_id]:
-                    slave_angle = angle_deg * ratio
-                    # Find which child link this slave_id belongs to
-                    slave_child_name = None
-                    for c_n, data in self.joints.items():
-                        if data.get('joint_id') == slave_id:
-                            slave_child_name = c_n
-                            break
+            robot = self.mw.robot
+            
+            def update_other_joint(target_id, target_val):
+                if target_id in robot.joints:
+                    target_joint = robot.joints[target_id]
+                    target_joint.current_value = target_val
                     
-                    if slave_child_name:
-                        # Avoid infinite recursion if there are circular relations (though we should avoid them)
-                        # We use a simpler update for slaves to avoid re-triggering this method
-                        slave_joint = self.mw.robot.joints.get(slave_id)
-                        if slave_joint:
-                            slave_joint.current_value = slave_angle
-                            self.joints[slave_child_name]['current_angle'] = slave_angle
-                            
-                            # Update MatricesPanel if it exists
-                            if hasattr(self.mw, 'matrices_tab'):
-                                self.mw.matrices_tab.sync_slider(slave_child_name, slave_angle)
+                    # Sync UI metadata for this joint
+                    # Find link name
+                    l_name = None
+                    for name, d in self.joints.items():
+                        if d.get('joint_id') == target_id:
+                            l_name = name
+                            break
+                    if l_name:
+                        self.joints[l_name]['current_angle'] = target_val
+                        # Sync MatricesPanel if exists
+                        if hasattr(self.mw, 'matrices_tab'):
+                            self.mw.matrices_tab.sync_slider(l_name, target_val)
+
+            # A. If Master moved -> Update all Slaves
+            if joint_id in robot.joint_relations:
+                for slave_id, ratio in robot.joint_relations[joint_id]:
+                    slave_angle = np.clip(angle_deg * ratio, robot.joints[slave_id].min_limit, robot.joints[slave_id].max_limit)
+                    update_other_joint(slave_id, slave_angle)
+            
+            # B. If Slave moved -> Update Master (and its other slaves)
+            else:
+                for m_id, slaves in robot.joint_relations.items():
+                    for s_id, ratio in slaves:
+                        if s_id == joint_id and abs(ratio) > 1e-6:
+                            m_angle = np.clip(angle_deg / ratio, robot.joints[m_id].min_limit, robot.joints[m_id].max_limit)
+                            update_other_joint(m_id, m_angle)
+                            # Update siblings
+                            for sib_id, sib_ratio in robot.joint_relations[m_id]:
+                                if sib_id != joint_id:
+                                    sib_angle = np.clip(m_angle * sib_ratio, robot.joints[sib_id].min_limit, robot.joints[sib_id].max_limit)
+                                    update_other_joint(sib_id, sib_angle)
+                            break
                 
-                # After updating all slaves, re-calc kinematics and update canvas once
-                self.mw.robot.update_kinematics()
-                self.mw.canvas.update_transforms(self.mw.robot)
+            # After updating all related, re-calc kinematics and update canvas once
+            self.mw.robot.update_kinematics()
+            self.mw.canvas.update_transforms(self.mw.robot)
 
     def reset_joint_ui(self):
         """Reset the joint creation UI"""
@@ -1310,3 +1438,46 @@ class JointPanel(QtWidgets.QWidget):
                     item.setForeground(QtGui.QColor("#1976d2"))  # Blue
             
             self.objects_list.addItem(item)
+
+    def on_select_gripper_surface(self):
+        """Callback for the Gripper Surface button on the canvas. Prepares for surface picking."""
+        self.mw.log("Gripper Surface Selection Mode: Please click the inner surface of the gripper in the 3D view.")
+        self.mw.show_toast("Select Gripper Inner Surface", "success")
+        
+        # If there's a canvas method for picking (like focus point), we can call it here.
+        # For now, we prepare the system for the feature integration.
+        if hasattr(self.mw.canvas, 'start_gripper_surface_picking'):
+            self.mw.canvas.start_gripper_surface_picking()
+
+    def on_set_live_point(self):
+        """Callback for 'Set Live Point' button. Activates point picking."""
+        self.mw.log("📍 Live Point Selection: Click a point on the gripper (TCP) where it should hold objects.")
+        self.mw.show_toast("Click to set Live Point (TCP)", "info")
+        self.mw.canvas.start_point_picking(self.on_live_point_picked)
+        
+    def on_live_point_picked(self, world_pt):
+        """Processes the picked point and saves it as custom TCP offset."""
+        if not self.child_object:
+            self.mw.log("⚠️ Error: No child object selected to attach Live Point.")
+            return
+            
+        child_link = self.mw.robot.links[self.child_object]
+        
+        # Convert world point to local coordinate system of the child link
+        # Local = Inv(World_T) * World_P
+        inv_world = np.linalg.inv(child_link.t_world)
+        local_pt = (inv_world @ np.append(world_pt, 1))[:3]
+        
+        # Save to robot model
+        child_link.custom_tcp_offset = local_pt
+        
+        # Save to local UI cache for persistence
+        if self.child_object in self.joints:
+            self.joints[self.child_object]['custom_tcp_offset'] = local_pt.tolist()
+            
+        self.mw.log(f"✅ Live Point (TCP) set: {np.round(local_pt, 2)} (Local cm)")
+        self.mw.show_toast("TCP Position Saved", "success")
+        
+        # Update UI display in Simulation/Main via update_live_ui
+        self.mw.update_live_ui()
+

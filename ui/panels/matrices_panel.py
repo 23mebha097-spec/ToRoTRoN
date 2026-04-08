@@ -119,7 +119,6 @@ class MatricesPanel(QtWidgets.QWidget):
             spin.setRange(data['min'], data['max'])
             spin.setValue(data.get('current_angle', 0.0))
             spin.setFixedWidth(70)
-            spin.setDecimals(1)
             spin.setStyleSheet("""
                 QDoubleSpinBox {
                     background: white;
@@ -224,10 +223,18 @@ class MatricesPanel(QtWidgets.QWidget):
                 
                 # Full relative transform (Offset * Rotation)
                 rot = joint.get_matrix()
+            if joint.child_link:
                 offset = joint.child_link.t_offset
                 t_rel = offset @ rot
                 
+                # Calculation summary in CM
+                ratio = self.mw.canvas.grid_units_per_cm
+                tx, ty, tz = t_rel[:3, 3] / ratio
+                self.text_area.append(f"  Pos (cm):  X: {tx:.3f}, Y: {ty:.3f}, Z: {tz:.3f}")
+                
+                # Full 4x4 matrix
                 self.text_area.append(self.format_matrix(t_rel))
+                self.text_area.append("-" * 40)
                 self.text_area.append("-" * 35) # Separator
                 self.text_area.append("")
 

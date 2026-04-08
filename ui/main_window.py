@@ -5,6 +5,7 @@ from ui.panels.align_panel import AlignPanel
 from ui.panels.joint_panel import JointPanel
 from ui.panels.matrices_panel import MatricesPanel
 from ui.panels.program_panel import ProgramPanel
+from ui.panels.gripper_panel import GripperPanel
 from ui.panels.simulation_panel import SimulationPanel
 from core.serial_manager import SerialManager
 import os
@@ -181,7 +182,8 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
             ("Align", "Align components together"),
             ("Joint", "Create and control joints"),
             ("Matrices", "View transformation matrices"),
-            ("Code", "Program robot movements")
+            ("Code", "Program robot movements"),
+            ("Gripper", "Control and calibrate robotic grippers")
         ]
         
         # Ensure panel_stack is initialized before buttons are connected
@@ -196,6 +198,7 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         self.joint_tab = JointPanel(self)
         self.matrices_tab = MatricesPanel(self)
         self.program_tab = ProgramPanel(self)
+        self.gripper_tab = GripperPanel(self)
         self.simulation_tab = SimulationPanel(self)
         
         self.panel_stack.addWidget(self.links_tab)
@@ -203,6 +206,7 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         self.panel_stack.addWidget(self.joint_tab)
         self.panel_stack.addWidget(self.matrices_tab)
         self.panel_stack.addWidget(self.program_tab)
+        self.panel_stack.addWidget(self.gripper_tab)
         self.panel_stack.addWidget(self.simulation_tab)
         
         for name, tooltip in nav_items:
@@ -315,6 +319,31 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         
         # REMOVED: Simulation Panel moved to sidebar
         
+        # --- Gripper Surface Button (bottom-right of canvas) ---
+        self.gripper_surface_btn = QtWidgets.QPushButton("Select Gripper Surface", self.canvas)
+        self.gripper_surface_btn.setToolTip("Click to select the inner surface of the gripper for contact")
+        self.gripper_surface_btn.setFixedSize(160, 40)
+        self.gripper_surface_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.gripper_surface_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                color: #2e7d32;
+                border: 2px solid #4caf50;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 13px;
+                padding: 5px;
+            }
+            QPushButton:hover {
+                background-color: #e8f5e9;
+            }
+            QPushButton:pressed {
+                background-color: #c8e6c9;
+            }
+        """)
+        self.gripper_surface_btn.clicked.connect(self.joint_tab.on_select_gripper_surface)
+        self.gripper_surface_btn.setVisible(False)  # Only visible in Joint Mode
+
         # Initial positions
         # Sidebar handles everything now
         original_resize = self.canvas.resizeEvent
@@ -322,6 +351,7 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
             original_resize(event)
             self.iso_btn.move(self.canvas.width() - 160, 24)
             self.focus_btn.move(self.canvas.width() - 160, 68)
+            self.gripper_surface_btn.move(self.canvas.width() - 180, self.canvas.height() - 60)
         
         self.canvas.resizeEvent = patched_resize
         
