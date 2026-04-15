@@ -2,6 +2,7 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 import time
 import os
 import re
+from ui.dialogs.motor_assign_dialog import MotorAssignDialog
 
 
 class RobotSyntaxHighlighter(QtGui.QSyntaxHighlighter):
@@ -213,6 +214,7 @@ class ProgramPanel(QtWidgets.QWidget):
         self.mw = main_window
         self.is_running = False
         self.current_lang = "command"  # Default language
+        self._motor_assignments = {}    # Session memory for motor type dialog
 
         # Example templates for each language
         self.templates = {
@@ -399,8 +401,28 @@ class ProgramPanel(QtWidgets.QWidget):
                 background-color: #1565c0;
             }
         """)
-        self.build_fw_btn.clicked.connect(lambda: self.mw.on_generate_code())
+        self.build_fw_btn.clicked.connect(self._open_motor_assign_dialog)
         layout.addWidget(self.build_fw_btn)
+
+    # ------------------------------------------------------------------
+    # Motor Assignment Dialog
+    # ------------------------------------------------------------------
+
+    def _open_motor_assign_dialog(self):
+        """Opens the motor-type assignment dialog then triggers firmware generation."""
+        if not self.mw.robot.joints:
+            self.mw.log("⚠️ No joints defined! Add joints first before building firmware.")
+            self.mw.show_toast("No joints defined yet", "warning")
+            return
+
+        dlg = MotorAssignDialog(
+            self.mw.robot,
+            parent=self,
+            previous_assignments=self._motor_assignments,
+        )
+        if dlg.exec_() == QtWidgets.QDialog.Accepted:
+            self._motor_assignments = dlg.get_assignments()
+            self.mw.on_generate_code(self._motor_assignments)
 
     def set_language(self, lang_key):
         """Switches the editor template and parsing mode."""

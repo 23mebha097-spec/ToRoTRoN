@@ -829,22 +829,35 @@ class NavigationMixin:
             self.console.setVisible(False)
             self.right_splitter.setSizes([800, 0])
 
-    def on_generate_code(self):
-        """Generates ESP32 code and populates the sidebar panel."""
+    def on_generate_code(self, motor_assignments=None):
+        """Generates ESP32 code with per-joint motor types and populates the sidebar panel."""
         if not self.robot.joints:
             self.log("⚠️ No joints defined! Add some joints first.")
             self.show_toast("No joints defined yet", "warning")
             return
-            
-        code = generate_esp32_firmware(self.robot, default_speed=self.current_speed)
+
+        # Build summary counts for the log
+        if motor_assignments:
+            n_servo   = sum(1 for v in motor_assignments.values() if v == "servo")
+            n_stepper = sum(1 for v in motor_assignments.values() if v == "stepper")
+            summary   = f"{n_servo} Servo, {n_stepper} Stepper"
+        else:
+            summary = f"{len(self.robot.joints)} Servo (default)"
+
+        code = generate_esp32_firmware(
+            self.robot,
+            default_speed=self.current_speed,
+            motor_assignments=motor_assignments,
+        )
         self.code_drawer.set_code(code)
-        
-        # Expand the splitter to show the code panel (Width 400 suggested)
+
+        # Expand the splitter to show the code panel
         self.code_drawer.show()
         self.main_splitter.setSizes([350, 450, 400])
-        
-        self.log("⚡ ESP32 Code Generated in Sidebar.")
+
+        self.log(f"⚡ Firmware Generated: {summary}")
         self.show_toast("Firmware built successfully", "success")
+
 
     def show_toast(self, message, toast_type='info', duration=3000):
         """Show an animated toast notification at the bottom-right of the window."""
