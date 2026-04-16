@@ -595,7 +595,7 @@ class RobotCanvas(QtWidgets.QWidget):
         self.setCursor(QtCore.Qt.ArrowCursor)
 
     def focus_on_point(self, point):
-        """Place a small sphere marker at the 3D point and focus the camera on it."""
+        """Focus camera on a 3D point without displaying a marker sphere."""
         point = np.array(point)
         
         # Remove previous focus marker if exists
@@ -612,13 +612,8 @@ class RobotCanvas(QtWidgets.QWidget):
                 zmin, zmax = min(zmin, b[4]), max(zmax, b[5])
             scene_diag = np.sqrt((xmax-xmin)**2 + (ymax-ymin)**2 + (zmax-zmin)**2)
             radius = scene_diag * 0.02  # 2% of scene diagonal
-        
-        # Create a sphere at the focus point
-        sphere = pv.Sphere(radius=radius, center=point)
-        self.plotter.add_mesh(sphere, color="#1976d2", opacity=0.85,
-                             name="focus_point_sphere", pickable=False)
-        
-        # Focus camera: set focal point and zoom in
+
+        # Focus camera: set focal point (no sphere visualization)
         cam = self.plotter.camera
         view_up = np.array(cam.GetViewUp())
         cam_pos = np.array(cam.position)
