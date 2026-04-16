@@ -42,7 +42,8 @@ class ProjectMixin:
                         "alignment_normal": None,
                         "alignment_cache": {},
                         "current_speed": 50,
-                        "camera_position": None
+                        "camera_position": None,
+                        "home_point": None
                     },
                     "joint_relations": {}
                 }
@@ -77,7 +78,46 @@ class ProjectMixin:
                         "axis": joint.axis.tolist(),
                         "min_limit": joint.min_limit,
                         "max_limit": joint.max_limit,
-                        "current_value": joint.current_value
+                        "current_value": joint.current_value,
+                        "is_gripper": getattr(joint, "is_gripper", False),
+                        "contact_surface_name": getattr(joint, "contact_surface_name", None),
+                        "contact_surface_link_name": getattr(joint, "contact_surface_link_name", None),
+                        "contact_surface_center_local": (
+                            joint.contact_surface_center_local.tolist()
+                            if getattr(joint, "contact_surface_center_local", None) is not None
+                            else None
+                        ),
+                        "contact_surface_normal_local": (
+                            joint.contact_surface_normal_local.tolist()
+                            if getattr(joint, "contact_surface_normal_local", None) is not None
+                            else None
+                        ),
+                        "gripping_surface_name": getattr(joint, "gripping_surface_name", None),
+                        "gripping_surface_link_name": getattr(joint, "gripping_surface_link_name", None),
+                        "gripping_surface_center_local": (
+                            joint.gripping_surface_center_local.tolist()
+                            if getattr(joint, "gripping_surface_center_local", None) is not None
+                            else None
+                        ),
+                        "gripping_surface_normal_local": (
+                            joint.gripping_surface_normal_local.tolist()
+                            if getattr(joint, "gripping_surface_normal_local", None) is not None
+                            else None
+                        ),
+                        "paired_gripping_enabled": getattr(joint, "paired_gripping_enabled", False),
+                        "paired_gripping_surface_joint_name": getattr(joint, "paired_gripping_surface_joint_name", None),
+                        "paired_gripping_surface_name": getattr(joint, "paired_gripping_surface_name", None),
+                        "paired_gripping_surface_link_name": getattr(joint, "paired_gripping_surface_link_name", None),
+                        "paired_gripping_surface_center_local": (
+                            joint.paired_gripping_surface_center_local.tolist()
+                            if getattr(joint, "paired_gripping_surface_center_local", None) is not None
+                            else None
+                        ),
+                        "paired_gripping_surface_normal_local": (
+                            joint.paired_gripping_surface_normal_local.tolist()
+                            if getattr(joint, "paired_gripping_surface_normal_local", None) is not None
+                            else None
+                        )
                     })
 
                 # 2b. Joint Relations
@@ -97,6 +137,14 @@ class ProjectMixin:
                 if hasattr(self, 'program_tab'):
                     robot_data["ui_state"]["program_code"] = self.program_tab.code_edit.toPlainText()
                     robot_data["ui_state"]["live_sync"] = self.program_tab.sync_hw_check.isChecked()
+
+                # Simulation home point
+                if hasattr(self, 'home_x') and hasattr(self, 'home_y') and hasattr(self, 'home_z'):
+                    robot_data["ui_state"]["home_point"] = [
+                        self.home_x.value(),
+                        self.home_y.value(),
+                        self.home_z.value()
+                    ]
 
                 # Align Panel Stored Point (for continuing joint creation)
                 if hasattr(self, 'align_tab'):
@@ -225,6 +273,39 @@ class ProjectMixin:
                         joint.min_limit = j_data.get("min_limit", -180.0)
                         joint.max_limit = j_data.get("max_limit", 180.0)
                         joint.current_value = j_data.get("current_value", 0.0)
+                        joint.is_gripper = j_data.get("is_gripper", False)
+                        joint.contact_surface_name = j_data.get("contact_surface_name")
+                        joint.contact_surface_link_name = j_data.get("contact_surface_link_name")
+                        joint.gripping_surface_name = j_data.get("gripping_surface_name")
+                        joint.gripping_surface_link_name = j_data.get("gripping_surface_link_name")
+                        joint.paired_gripping_enabled = j_data.get("paired_gripping_enabled", False)
+                        joint.paired_gripping_surface_joint_name = j_data.get("paired_gripping_surface_joint_name")
+                        joint.paired_gripping_surface_name = j_data.get("paired_gripping_surface_name")
+                        joint.paired_gripping_surface_link_name = j_data.get("paired_gripping_surface_link_name")
+
+                        surface_center = j_data.get("contact_surface_center_local")
+                        if surface_center is not None:
+                            joint.contact_surface_center_local = np.array(surface_center, dtype=float)
+
+                        surface_normal = j_data.get("contact_surface_normal_local")
+                        if surface_normal is not None:
+                            joint.contact_surface_normal_local = np.array(surface_normal, dtype=float)
+
+                        gripping_center = j_data.get("gripping_surface_center_local")
+                        if gripping_center is not None:
+                            joint.gripping_surface_center_local = np.array(gripping_center, dtype=float)
+
+                        gripping_normal = j_data.get("gripping_surface_normal_local")
+                        if gripping_normal is not None:
+                            joint.gripping_surface_normal_local = np.array(gripping_normal, dtype=float)
+
+                        paired_center = j_data.get("paired_gripping_surface_center_local")
+                        if paired_center is not None:
+                            joint.paired_gripping_surface_center_local = np.array(paired_center, dtype=float)
+
+                        paired_normal = j_data.get("paired_gripping_surface_normal_local")
+                        if paired_normal is not None:
+                            joint.paired_gripping_surface_normal_local = np.array(paired_normal, dtype=float)
 
                 # 5b. Load Joint Relations
                 self.robot.joint_relations = robot_data.get("joint_relations", {})
@@ -239,6 +320,83 @@ class ProjectMixin:
                     for child_name, data in self.joint_tab.joints.items():
                         if 'alignment_point' in data and data['alignment_point'] is not None:
                             data['alignment_point'] = np.array(data['alignment_point'])
+
+                        child_link = self.robot.links.get(child_name)
+                        if child_link and data.get('custom_tcp_offset') is not None:
+                            child_link.custom_tcp_offset = np.array(data['custom_tcp_offset'], dtype=float)
+
+                        joint_id = data.get('joint_id')
+                        joint = self.robot.joints.get(joint_id)
+                        if joint:
+                            joint.is_gripper = data.get('is_gripper', joint.is_gripper)
+
+                            if joint.contact_surface_name is None:
+                                joint.contact_surface_name = data.get('contact_surface_name')
+
+                            if joint.contact_surface_link_name is None:
+                                joint.contact_surface_link_name = data.get('contact_surface_link')
+
+                            if joint.contact_surface_center_local is None and data.get('contact_surface_center_local') is not None:
+                                joint.contact_surface_center_local = np.array(
+                                    data['contact_surface_center_local'], dtype=float
+                                )
+
+                            if joint.contact_surface_normal_local is None and data.get('contact_surface_normal_local') is not None:
+                                joint.contact_surface_normal_local = np.array(
+                                    data['contact_surface_normal_local'], dtype=float
+                                )
+
+                            if joint.gripping_surface_name is None:
+                                joint.gripping_surface_name = data.get('gripping_surface_name')
+
+                            if joint.gripping_surface_link_name is None:
+                                joint.gripping_surface_link_name = data.get('gripping_surface_link')
+
+                            if joint.gripping_surface_center_local is None and data.get('gripping_surface_center_local') is not None:
+                                joint.gripping_surface_center_local = np.array(
+                                    data['gripping_surface_center_local'], dtype=float
+                                )
+
+                            if joint.gripping_surface_normal_local is None and data.get('gripping_surface_normal_local') is not None:
+                                joint.gripping_surface_normal_local = np.array(
+                                    data['gripping_surface_normal_local'], dtype=float
+                                )
+
+                            joint.paired_gripping_enabled = data.get(
+                                'paired_gripping_enabled',
+                                getattr(joint, 'paired_gripping_enabled', False)
+                            )
+
+                            if joint.paired_gripping_surface_joint_name is None:
+                                joint.paired_gripping_surface_joint_name = data.get(
+                                    'paired_gripping_surface_joint_name'
+                                )
+
+                            if joint.paired_gripping_surface_name is None:
+                                joint.paired_gripping_surface_name = data.get(
+                                    'paired_gripping_surface_name'
+                                )
+
+                            if joint.paired_gripping_surface_link_name is None:
+                                joint.paired_gripping_surface_link_name = data.get(
+                                    'paired_gripping_surface_link'
+                                )
+
+                            if (
+                                joint.paired_gripping_surface_center_local is None
+                                and data.get('paired_gripping_surface_center_local') is not None
+                            ):
+                                joint.paired_gripping_surface_center_local = np.array(
+                                    data['paired_gripping_surface_center_local'], dtype=float
+                                )
+
+                            if (
+                                joint.paired_gripping_surface_normal_local is None
+                                and data.get('paired_gripping_surface_normal_local') is not None
+                            ):
+                                joint.paired_gripping_surface_normal_local = np.array(
+                                    data['paired_gripping_surface_normal_local'], dtype=float
+                                )
                     
                     self.joint_tab.refresh_joints_history()
                     self.joint_tab.refresh_links()
@@ -247,6 +405,19 @@ class ProjectMixin:
                 if hasattr(self, 'program_tab'):
                     self.program_tab.code_edit.setPlainText(ui_state.get("program_code", ""))
                     self.program_tab.sync_hw_check.setChecked(ui_state.get("live_sync", False))
+
+                # Restore Simulation Home Point
+                home_point = ui_state.get("home_point")
+                if home_point and hasattr(self, 'home_x') and hasattr(self, 'home_y') and hasattr(self, 'home_z'):
+                    self.home_x.blockSignals(True)
+                    self.home_y.blockSignals(True)
+                    self.home_z.blockSignals(True)
+                    self.home_x.setValue(home_point[0])
+                    self.home_y.setValue(home_point[1])
+                    self.home_z.setValue(home_point[2])
+                    self.home_x.blockSignals(False)
+                    self.home_y.blockSignals(False)
+                    self.home_z.blockSignals(False)
 
                 # Restore Align Panel alignment data
                 if hasattr(self, 'align_tab'):

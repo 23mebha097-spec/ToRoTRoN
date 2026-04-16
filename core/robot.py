@@ -33,6 +33,20 @@ class Joint:
         self.min_limit = -180.0
         self.max_limit = 180.0
         self.current_value = 0.0
+        self.contact_surface_name = None
+        self.contact_surface_link_name = None
+        self.contact_surface_center_local = None
+        self.contact_surface_normal_local = None
+        self.gripping_surface_name = None
+        self.gripping_surface_link_name = None
+        self.gripping_surface_center_local = None
+        self.gripping_surface_normal_local = None
+        self.paired_gripping_enabled = False
+        self.paired_gripping_surface_joint_name = None
+        self.paired_gripping_surface_name = None
+        self.paired_gripping_surface_link_name = None
+        self.paired_gripping_surface_center_local = None
+        self.paired_gripping_surface_normal_local = None
         
         # Link children
         parent_link.child_joints.append(self)

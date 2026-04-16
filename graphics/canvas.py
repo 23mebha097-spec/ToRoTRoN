@@ -1,13 +1,33 @@
-import pyvista as pv
-from pyvistaqt import QtInteractor
+from __future__ import annotations
+
 from PyQt5 import QtWidgets, QtCore, QtGui
 import numpy as np
-import vtkmodules.vtkRenderingCore as vtkRenderingCore
-import vtkmodules.vtkCommonCore as vtkCommonCore
+
+pv = None
+QtInteractor = None
+vtkRenderingCore = None
+vtkCommonCore = None
+
+
+def _ensure_3d_imports():
+    global pv, QtInteractor, vtkRenderingCore, vtkCommonCore
+    if pv is not None:
+        return
+
+    import pyvista as _pv
+    from pyvistaqt import QtInteractor as _QtInteractor
+    import vtkmodules.vtkRenderingCore as _vtkRenderingCore
+    import vtkmodules.vtkCommonCore as _vtkCommonCore
+
+    pv = _pv
+    QtInteractor = _QtInteractor
+    vtkRenderingCore = _vtkRenderingCore
+    vtkCommonCore = _vtkCommonCore
 
 class RobotCanvas(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        _ensure_3d_imports()
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         
@@ -77,12 +97,15 @@ class RobotCanvas(QtWidgets.QWidget):
         self.on_drop_callback = None
         self.on_deselect_callback = None
         self.picking_face = False
+        self.picking_edge = False
         self.picking_color = "orange"
         self.enable_drag = True
         self._selection_dim_actors = []
         
         self.interaction_mode = "rotate" # 'rotate'
         self.picking_focus_point = False  # Focus point picking mode
+        self.on_edge_picked_callback = None
+        self._live_point_actor_name = "live_point_marker"
 
     def _dist_point_to_segment(self, p, a, b):
         """Calculates distance from point p to line segment (a, b)"""
@@ -494,6 +517,83 @@ class RobotCanvas(QtWidgets.QWidget):
         self.mw_log("Click anywhere on the 3D scene to set a focus point...")
         self.setCursor(QtCore.Qt.CrossCursor)
 
+    def start_edge_picking(self, callback, color="#e65100"):
+        """Activates specialized edge picking mode."""
+        self.on_edge_picked_callback = callback
+        self.picking_edge = True
+        self.picking_color = color
+        self.mw_log(f"Edge Picking Active: Click an edge on the 3D model...")
+
+    def _on_edge_pick_click(self, click_pos):
+        """Pick an edge from the mesh under the cursor."""
+        self.cell_picker.Pick(click_pos[0], click_pos[1], 0, self.plotter.renderer)
+        cell_id = self.cell_picker.GetCellId()
+        actor = self.cell_picker.GetActor()
+
+        if cell_id != -1 and actor:
+            link_name = next((name for name, a in self.actors.items() if a == actor), None)
+            if link_name:
+                mesh = pv.wrap(actor.GetMapper().GetInput())
+                
+                # Find the closest edge of the picked cell to the click point
+                cell = mesh.GetCell(cell_id)
+                n_edges = cell.GetNumberOfEdges()
+                
+                mat = actor.user_matrix
+                inv_mat = np.linalg.inv(mat)
+                world_pick_pt = self.cell_picker.GetPickPosition()
+                local_pick_pt = (inv_mat @ np.append(world_pick_pt, 1))[:3]
+                
+                best_edge_pts = None
+                min_dist = float('inf')
+                
+                for i in range(n_edges):
+                    edge = cell.GetEdge(i)
+                    p1 = np.array(mesh.GetPoint(edge.GetPointId(0)))
+                    p2 = np.array(mesh.GetPoint(edge.GetPointId(1)))
+                    d = self._dist_point_to_segment(local_pick_pt, p1, p2)
+                    if d < min_dist:
+                        min_dist = d
+                        best_edge_pts = (p1, p2)
+                
+                if best_edge_pts:
+                    p1_w = (mat @ np.append(best_edge_pts[0], 1))[:3]
+                    p2_w = (mat @ np.append(best_edge_pts[1], 1))[:3]
+                    
+                    if self.on_edge_picked_callback:
+                        self.on_edge_picked_callback(link_name, p1_w, p2_w)
+                    
+                    # Visual Highlight
+                    edge_mesh = pv.Line(p1_w, p2_w)
+                    self.plotter.add_mesh(
+                        edge_mesh,
+                        color=self.picking_color,
+                        line_width=8,
+                        name=f"edge_highlight_{link_name}_{cell_id}",
+                        pickable=False
+                    )
+                    
+                self.picking_edge = False
+                self.plotter.render()
+                return True
+        return False
+
+    def deselect_all(self):
+        """Standard CAD behavior: Escape or blank click clears everything."""
+        self.selected_name = None
+        self.picking_face = False
+        self.picking_edge = False
+        self.picking_focus_point = False
+        
+        # Remove pick highlights
+        to_remove = [a for a in self.plotter.renderer.actors if "edge_highlight" in a or "pick_highlight" in a]
+        for a in to_remove:
+            self.plotter.remove_actor(a)
+            
+        self.plotter.render()
+        self.mw_log("Selection cleared.")
+        self.setCursor(QtCore.Qt.ArrowCursor)
+
     def focus_on_point(self, point):
         """Place a small sphere marker at the 3D point and focus the camera on it."""
         point = np.array(point)
@@ -542,6 +642,70 @@ class RobotCanvas(QtWidgets.QWidget):
         try:
             self.plotter.remove_actor("focus_point_sphere")
         except:
+            pass
+
+    def set_live_point_marker(self, point, color="#1976d2", name=None, radius=None, opacity=1.0, render=True):
+        """Show a small 3D marker at a world point (used for TCP/live path feedback)."""
+        pt = np.array(point, dtype=float).reshape(-1)
+        if pt.size < 3:
+            return
+        pt = pt[:3]
+
+        actor_name = name or self._live_point_actor_name
+        if radius is None:
+            radius = max(1.0, float(self.grid_units_per_cm) * 0.25)  # ~2.5mm when 10 units = 1cm
+
+        try:
+            actor = self.plotter.actors.get(actor_name)
+        except Exception:
+            actor = None
+
+        if actor is None:
+            try:
+                self.plotter.remove_actor(actor_name)
+            except Exception:
+                pass
+            # Create sphere directly at target position
+            sphere = pv.Sphere(radius=float(radius), center=tuple(pt), theta_resolution=24, phi_resolution=24)
+            actor = self.plotter.add_mesh(
+                sphere,
+                color=color,
+                name=actor_name,
+                pickable=False,
+                opacity=float(opacity),
+            )
+        else:
+            # Update existing actor position using user_matrix (PyVista-correct way)
+            try:
+                mat = actor.user_matrix
+                mat[0, 3] = float(pt[0])
+                mat[1, 3] = float(pt[1])
+                mat[2, 3] = float(pt[2])
+                actor.user_matrix = mat
+            except Exception:
+                # Fallback: recreate the marker if the actor handle is stale.
+                try:
+                    self.plotter.remove_actor(actor_name)
+                except Exception:
+                    pass
+                sphere = pv.Sphere(radius=float(radius), center=tuple(pt), theta_resolution=24, phi_resolution=24)
+                self.plotter.add_mesh(
+                    sphere,
+                    color=color,
+                    name=actor_name,
+                    pickable=False,
+                    opacity=float(opacity),
+                )
+
+        if render:
+            self.plotter.render()
+
+    def clear_live_point_marker(self, name=None):
+        """Remove the live point marker from the 3D graph."""
+        actor_name = name or self._live_point_actor_name
+        try:
+            self.plotter.remove_actor(actor_name)
+        except Exception:
             pass
 
     def _on_left_down(self, obj, event):
@@ -603,6 +767,14 @@ class RobotCanvas(QtWidgets.QWidget):
             self.on_object_picked_callback = None
             self.setCursor(QtCore.Qt.ArrowCursor)
             return
+
+        # --- EDGE PICKING MODE ---
+        if hasattr(self, 'picking_edge') and self.picking_edge:
+            if self._on_edge_pick_click(click_pos):
+                return
+            else:
+                self.plotter.interactor.GetInteractorStyle().OnLeftButtonDown()
+                return
         
         # --- POINT PICKING MODE (JOINT ORIGIN) ---
         if hasattr(self, 'picking_point') and self.picking_point:

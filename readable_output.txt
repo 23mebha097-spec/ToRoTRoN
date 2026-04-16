@@ -1,0 +1,30 @@
+﻿Exit code: 0
+Total output lines: 28
+============================================================
+  PICK & PLACE STATUS  :  SUCCESS
+  OBJECT ORIENTATION   :  Roll=5.7░  Pitch=5.7░  Yaw=17.2░
+  ORIENTATION POLICY   :  LOCKED ù identical at pick AND place
+============================================================
+[HOME] Joints: [ 0.    -1.571  1.571 -1.571 -1.571  0.   ]
+[PRE-PICK] Joints=[ 0.798 -1.674  4.02  -0.816 -1.435 -2.071] | Pos err=0.62 mm | Ori LOCKED @Roll=5.7░ Pitch=5.7░ Yaw=17.2░
+[APPROACH] Joints=[ 0.798 -2.558  4.037  0.052 -1.435 -2.071] | Pos err=0.86 mm | Ori LOCKED @Roll=5.7░ Pitch=5.7░ Yaw=17.2░
+[GRASP] Gripper CLOSED | Orientation preserved: Roll=5.7░ Pitch=5.7░ Yaw=17.2░
+[LIFT] Joints=[ 0.798 -1.676  4.02  -0.813 -1.435 -2.071] | Pos err=0.91 mm | Ori LOCKED @Roll=5.7░ Pitch=5.7░ Yaw=17.2░
+[TRANSFER] Joints=[-0.464 -1.586  3.961 -0.945 -1.567 -0.812] | Pos err=0.82 mm | Ori LOCKED @Roll=5.7░ Pitch=5.7░ Yaw=17.2░
+[PLACE] Joints=[-0.465 -2.693  4.024  0.099 -1.568 -0.811] | Pos err=0.55 mm | Ori LOCKED @Roll=5.7░ Pitch=5.7░ Yaw=17.2░
+[RELEASE] Gripper OPENED | Object placed at Roll=5.7░ Pitch=5.7░ Yaw=17.2░
+[RETRACT] Joints=[-0.465 -1.589  3.962 -0.944 -1.568 -0.811] | Pos err=0.59 mm | Ori LOCKED @Roll=5.7░ Pitch=5.7░ Yaw=17.2░
+[RETURN] Joints: [ 0.    -1.571  1.571 -1.571 -1.571  0.   ]
+============================================================
+2026-04-14 14:07:17,084 - INFO - Starting Sequence Execution...
+2026-04-14 14:07:17,084 - INFO - [ORIENTATION LOCK] Roll=5.7░ Pitch=5.7░ Yaw=17.2░ ù fixed for ALL waypoints
+2026-04-14 14:07:17,084 - INFO - [HOME] Moved to Home joints
+2026-04-14 14:07:17,093 - INFO - [PRE-PICK] -> XYZ=[0.4 0.2 0.4] | Ori=Roll=5.7░ Pitch=5.7░ Yaw=17.2░ [LOCKED] | Pos err=0.62 mm
+2026-04-14 14:07:17,095 - INFO - [APPROACH] -> XYZ=[0.4 0.2 0.1] | Ori=Roll=5.7░ Pitch=5.7░ Yaw=17.2░ [LOCKED] | Pos err=0.86 mm
+2026-04-14 14:07:17,096 - INFO - [GRIPPER] CLOSE | Confirmed
+2026-04-14 14:07:17,100 - INFO - [LIFT] -> XYZ=[0.4 0.2 0.4] | Ori=Roll=5.7░ Pitch=5.7░ Yaw=17.2░ [LOCKED] | Pos err=0.91 mm
+2026-04-14 14:07:17,105 - INFO - [TRANSFER] -> XYZ=[ 0.3 -0.3  0.4] | Ori=Roll=5.7░ Pitch=5.7░ Yaw=17.2░ [LOCKED] | Pos err=0.82 mm
+2026-04-14 14:07:17,109 - INFO - [PLACE] -> XYZ=[ 0.3  -0.3   0.05] | Ori=Roll=5.7░ Pitch=5.7░ Yaw=17.2░ [LOCKED] | Pos err=0.55 mm
+2026-04-14 14:07:17,109 - INFO - [GRIPPER] OPEN | Confirmed
+2026-04-14 14:07:17,114 - INFO - [RETRACT] -> XYZ=[ 0.3 -0.3  0.4] | Ori=Roll=5.7░ Pitch=5.7░ Yaw=17.2░ [LOCKED] | Pos err=0.59 mm
+2026-04-14 14:07:17,114 - INFO - [RETURN] Moved to Home joints

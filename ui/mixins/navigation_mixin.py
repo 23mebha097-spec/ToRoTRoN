@@ -356,6 +356,11 @@ class NavigationMixin:
             # Refresh Property Display
             self.simulation_tab.refresh_object_info(name)
 
+            # Keep the gripper compute panel in sync with the selected object.
+            gripper_tab = getattr(self, "gripper_tab", None)
+            if gripper_tab is not None and hasattr(gripper_tab, "_refresh_compute_ui"):
+                gripper_tab._refresh_compute_ui()
+
     def save_sim_object_coords(self):
         """Saves current spinbox values back to the selected simulation object."""
         current_item = self.sim_objects_list.currentItem()
@@ -378,8 +383,11 @@ class NavigationMixin:
             return
             
         tcp_link = None
+        if hasattr(self, 'simulation_tab') and hasattr(self.simulation_tab, '_get_tcp_link'):
+            tcp_link = self.simulation_tab._get_tcp_link()
+
         custom_tcp = getattr(self, 'custom_tcp_name', None)
-        if custom_tcp and custom_tcp in self.robot.links:
+        if tcp_link is None and custom_tcp and custom_tcp in self.robot.links:
             tcp_link = self.robot.links[custom_tcp]
         
         if not tcp_link:
@@ -395,7 +403,6 @@ class NavigationMixin:
                     break
         
         if tcp_link:
-            # Use Tool Point for accurate LP display
             pos, _, _ = self.get_link_tool_point(tcp_link)
             
             self.live_x.blockSignals(True)
@@ -411,10 +418,201 @@ class NavigationMixin:
             self.live_y.blockSignals(False)
             self.live_z.blockSignals(False)
 
+            if hasattr(self.canvas, "set_live_point_marker"):
+                self.canvas.set_live_point_marker(pos)
+
+            self._record_live_point_path(pos)
+
             # 2. Pick-and-Place Simulation Logic (MAGNET MODE)
             sim_tab = self.simulation_tab
-            if hasattr(sim_tab, 'is_sim_active') and sim_tab.is_sim_active:
+            if (
+                hasattr(sim_tab, 'is_sim_active')
+                and sim_tab.is_sim_active
+                and getattr(sim_tab, 'sim_state', 'IDLE') == 'IDLE'
+            ):
                 self._handle_sim_pick_place(tcp_link, pos, ratio)
+
+    def snap_live_point_to_home(self):
+        """Forces the live-point UI and overlay to the configured home position."""
+        if not hasattr(self, "home_x") or not hasattr(self, "home_y") or not hasattr(self, "home_z"):
+            return
+
+        ratio = self.canvas.grid_units_per_cm
+        home_pos = np.array([
+            self.home_x.value() * ratio,
+            self.home_y.value() * ratio,
+            self.home_z.value() * ratio,
+        ], dtype=float)
+
+        if hasattr(self, "live_x") and hasattr(self, "live_y") and hasattr(self, "live_z"):
+            self.live_x.blockSignals(True)
+            self.live_y.blockSignals(True)
+            self.live_z.blockSignals(True)
+            self.live_x.setValue(self.home_x.value())
+            self.live_y.setValue(self.home_y.value())
+            self.live_z.setValue(self.home_z.value())
+            self.live_x.blockSignals(False)
+            self.live_y.blockSignals(False)
+            self.live_z.blockSignals(False)
+
+        if hasattr(self, "canvas") and hasattr(self.canvas, "record_live_point_path"):
+            self.canvas.record_live_point_path(home_pos)
+        if hasattr(self, "canvas") and hasattr(self.canvas, "set_live_point_marker"):
+            self.canvas.set_live_point_marker(home_pos)
+
+    def _record_live_point_path(self, pos=None):
+        """Records the current TCP position when the live-point path overlay is enabled."""
+        if not hasattr(self, "canvas") or not hasattr(self.canvas, "record_live_point_path"):
+            return
+
+        if pos is None:
+            tcp_link = None
+            if hasattr(self, 'simulation_tab') and hasattr(self.simulation_tab, '_get_tcp_link'):
+                tcp_link = self.simulation_tab._get_tcp_link()
+
+            custom_tcp = getattr(self, 'custom_tcp_name', None)
+            if tcp_link is None and custom_tcp and custom_tcp in self.robot.links:
+                tcp_link = self.robot.links[custom_tcp]
+
+            if not tcp_link:
+                for link in self.robot.links.values():
+                    if link.parent_joint and not link.child_joints:
+                        tcp_link = link
+                        break
+
+            if not tcp_link:
+                for link in self.robot.links.values():
+                    if not link.is_base:
+                        tcp_link = link
+                        break
+
+            if not tcp_link:
+                return
+
+            pos, _, _ = self.get_link_tool_point(tcp_link)
+
+        self.canvas.record_live_point_path(pos)
+        if hasattr(self.canvas, "set_live_point_marker"):
+            self.canvas.set_live_point_marker(pos)
+
+    def _get_joint_surface_world(self, joint, prefer_gripping=True):
+        """Resolve a saved joint surface into world-space coordinates."""
+        if not joint:
+            return None
+
+        surface_prefixes = ["gripping", "contact"] if prefer_gripping else ["contact", "gripping"]
+        for prefix in surface_prefixes:
+            link_name = getattr(joint, f"{prefix}_surface_link_name", None)
+            center_local = getattr(joint, f"{prefix}_surface_center_local", None)
+            normal_local = getattr(joint, f"{prefix}_surface_normal_local", None)
+            surface_name = getattr(joint, f"{prefix}_surface_name", None)
+
+            if not link_name or center_local is None or link_name not in self.robot.links:
+                continue
+
+            surface_link = self.robot.links[link_name]
+            world_center = (surface_link.t_world @ np.append(np.array(center_local, dtype=float), 1.0))[:3]
+
+            world_normal = None
+            if normal_local is not None:
+                world_normal = surface_link.t_world[:3, :3] @ np.array(normal_local, dtype=float)
+                norm = np.linalg.norm(world_normal)
+                if norm > 1e-9:
+                    world_normal = world_normal / norm
+
+            return {
+                "joint_name": joint.name,
+                "link_name": link_name,
+                "surface_name": surface_name,
+                "local_center": np.array(center_local, dtype=float),
+                "local_normal": np.array(normal_local, dtype=float) if normal_local is not None else None,
+                "world_center": world_center,
+                "world_normal": world_normal,
+                "is_gripping_surface": (prefix == "gripping"),
+            }
+
+        return None
+
+    def _get_joint_paired_surface_world(self, joint):
+        """Resolve the explicitly paired second gripping surface into world space."""
+        if not joint:
+            return None
+
+        link_name = getattr(joint, "paired_gripping_surface_link_name", None)
+        center_local = getattr(joint, "paired_gripping_surface_center_local", None)
+        normal_local = getattr(joint, "paired_gripping_surface_normal_local", None)
+        surface_name = getattr(joint, "paired_gripping_surface_name", None)
+        pair_joint_name = getattr(joint, "paired_gripping_surface_joint_name", None)
+
+        if not link_name or center_local is None or link_name not in self.robot.links:
+            return None
+
+        surface_link = self.robot.links[link_name]
+        world_center = (surface_link.t_world @ np.append(np.array(center_local, dtype=float), 1.0))[:3]
+
+        world_normal = None
+        if normal_local is not None:
+            world_normal = surface_link.t_world[:3, :3] @ np.array(normal_local, dtype=float)
+            norm = np.linalg.norm(world_normal)
+            if norm > 1e-9:
+                world_normal = world_normal / norm
+
+        return {
+            "joint_name": joint.name,
+            "pair_joint_name": pair_joint_name,
+            "link_name": link_name,
+            "surface_name": surface_name,
+            "local_center": np.array(center_local, dtype=float),
+            "local_normal": np.array(normal_local, dtype=float) if normal_local is not None else None,
+            "world_center": world_center,
+            "world_normal": world_normal,
+            "is_paired_surface": True,
+        }
+
+    def _get_gripper_surface_samples(self, link):
+        """Collect saved gripping/contact surfaces for gripper child joints."""
+        if not link:
+            return []
+
+        explicit_pairs = []
+        for joint in link.child_joints:
+            if not (getattr(joint, 'is_gripper', False) and joint.child_link):
+                continue
+
+            if not getattr(joint, 'paired_gripping_enabled', False):
+                continue
+
+            primary_sample = self._get_joint_surface_world(joint, prefer_gripping=True)
+            secondary_sample = self._get_joint_paired_surface_world(joint)
+            if primary_sample is None or secondary_sample is None:
+                continue
+
+            explicit_pairs.append((primary_sample, secondary_sample))
+
+        if explicit_pairs:
+            best_primary, best_secondary = max(
+                explicit_pairs,
+                key=lambda pair: float(
+                    np.linalg.norm(pair[0]["world_center"] - pair[1]["world_center"])
+                )
+            )
+            return [best_primary, best_secondary]
+
+        gripping_samples = []
+        fallback_samples = []
+
+        for joint in link.child_joints:
+            if getattr(joint, 'is_gripper', False) and joint.child_link:
+                gripping_sample = self._get_joint_surface_world(joint, prefer_gripping=True)
+                if gripping_sample is not None and gripping_sample.get("is_gripping_surface"):
+                    gripping_samples.append(gripping_sample)
+                    continue
+
+                fallback_sample = self._get_joint_surface_world(joint, prefer_gripping=False)
+                if fallback_sample is not None:
+                    fallback_samples.append(fallback_sample)
+
+        return gripping_samples if len(gripping_samples) >= 2 else fallback_samples
 
     def get_link_tool_point(self, link, return_vec=False):
         """
@@ -431,6 +629,69 @@ class NavigationMixin:
         for joint in link.child_joints:
             if getattr(joint, 'is_gripper', False) and joint.child_link:
                 fingers.append(joint.child_link)
+
+        # --- Priority 0: Explicit gripping surfaces selected in Gripper tab ---
+        surface_samples = self._get_gripper_surface_samples(link)
+        if len(surface_samples) >= 2:
+            pts_world = [sample["world_center"] for sample in surface_samples]
+            inv_hand = np.linalg.inv(link.t_world)
+            pts_local = [
+                (inv_hand @ np.append(sample["world_center"], 1.0))[:3]
+                for sample in surface_samples
+            ]
+
+            local_tool_point = np.mean(pts_local, axis=0)
+            world_tool_point = (link.t_world @ np.append(local_tool_point, 1.0))[:3]
+
+            max_span_centers = 0.0
+            best_indices = (0, 1)
+            best_vec = np.array([1.0, 0.0, 0.0])
+            for i in range(len(pts_world)):
+                for j in range(i + 1, len(pts_world)):
+                    v = pts_world[i] - pts_world[j]
+                    d = np.linalg.norm(v)
+                    if d > max_span_centers:
+                        max_span_centers = d
+                        best_vec = v
+                        best_indices = (i, j)
+
+            if np.linalg.norm(best_vec) > 1e-9:
+                best_vec /= np.linalg.norm(best_vec)
+
+            approach_axis = link.t_world[:3, 2]
+            if np.linalg.norm(approach_axis) > 1e-9:
+                approach_axis /= np.linalg.norm(approach_axis)
+
+            finger_depth = 0.0
+            depth_samples = []
+            for f in fingers:
+                if f.mesh:
+                    v_w = (f.t_world[:3, :3] @ f.mesh.vertices.T).T + f.t_world[:3, 3]
+                    p_depth = v_w @ approach_axis
+                    depth_samples.append(np.ptp(p_depth))
+            if depth_samples:
+                finger_depth = np.max(depth_samples)
+
+            real_gap = max_span_centers
+            if len(pts_world) >= 2:
+                p1 = pts_world[best_indices[0]] @ best_vec
+                p2 = pts_world[best_indices[1]] @ best_vec
+                real_gap = abs(p1 - p2)
+
+            if return_vec:
+                return world_tool_point, local_tool_point, {
+                    "fingers_world": pts_world,
+                    "gripping_surfaces_world": pts_world,
+                    "surface_samples": surface_samples,
+                    "primary_axis": best_vec,
+                    "approach_axis": approach_axis,
+                    "finger_depth": finger_depth,
+                    "real_gap": real_gap,
+                    "centers_span": max_span_centers,
+                    "using_selected_gripping_surfaces": True
+                }
+
+            return world_tool_point, local_tool_point, real_gap
 
         # --- Priority 1: User-Defined Custom TCP (Live Point) ---
         if hasattr(link, 'custom_tcp_offset') and link.custom_tcp_offset is not None:
@@ -617,9 +878,24 @@ class NavigationMixin:
             if dist_p1 < THRESHOLD:
                 self.log(f"🧲 GRIPPED: {obj_name} at P1")
                 sim_tab.gripped_object = obj_name
-                # Store relative transform from TCP Frame to Object
-                inv_tcp = np.linalg.inv(tcp_link.t_world)
-                sim_tab.grip_offset = inv_tcp @ obj_link.t_world
+                # Keep the object parallel to the floor while carrying it.
+                local_center = obj_link.mesh.centroid if obj_link.mesh else np.zeros(3)
+                fixed_rotation = None
+                if hasattr(sim_tab, "_make_world_parallel_rotation"):
+                    fixed_rotation = sim_tab._make_world_parallel_rotation(obj_link.t_world[:3, :3])
+                if fixed_rotation is None:
+                    fixed_rotation = obj_link.t_world[:3, :3].copy()
+
+                sim_tab.grip_fixed_rotation = fixed_rotation.copy()
+                sim_tab.grip_local_center = local_center.copy()
+                sim_tab.grip_anchor_world = tool_pos.copy()
+
+                t_obj = np.eye(4)
+                t_obj[:3, :3] = fixed_rotation
+                t_obj[:3, 3] = tool_pos - fixed_rotation @ local_center
+                sim_tab.grip_offset = t_obj.copy()
+                obj_link.t_offset = t_obj
+                self.canvas.update_transforms(self.robot)
                 
                 # AUTO-CLOSE GRIPPER
                 self._control_gripper_fingers(close=True)
@@ -628,8 +904,17 @@ class NavigationMixin:
         # STATE B: We ARE gripping, update object and look for P2 (Place)
         else:
             if sim_tab.gripped_object == obj_name:
-                # FOLLOW THE ROBOT
-                obj_link.t_offset = tcp_link.t_world @ sim_tab.grip_offset
+                # FOLLOW THE ROBOT WITHOUT TILTING THE OBJECT.
+                fixed_rotation = getattr(sim_tab, "grip_fixed_rotation", None)
+                local_center = getattr(sim_tab, "grip_local_center", None)
+                if fixed_rotation is None or local_center is None:
+                    fixed_rotation = obj_link.t_world[:3, :3].copy()
+                    local_center = obj_link.mesh.centroid if obj_link.mesh else np.zeros(3)
+
+                t_obj = np.eye(4)
+                t_obj[:3, :3] = fixed_rotation
+                t_obj[:3, 3] = tool_pos - fixed_rotation @ local_center
+                obj_link.t_offset = t_obj
                 self.canvas.update_transforms(self.robot)
                 
                 # Refresh property display (it's moving!)
@@ -667,85 +952,160 @@ class NavigationMixin:
 
     def _control_gripper_fingers(self, close=True, target_gap_world=None, apply=True):
         """
-        Moves gripper master joints to open/close the fingers.
+        Moves gripper control joints to open/close the jaws in a coordinated way.
 
-        Args:
-            close (bool): True = close fully, False = open fully.
-            target_gap_world (float | None): If provided, use binary search
-                to find the joint angle that produces this gap (canvas units).
-            apply (bool): If True, sets joint values instantly. If False,
-                returns a dict of {joint_name: target_angle}.
+        If two jaws are selected, this solves them as a pair instead of driving only one side.
         """
-        master_joints = [
-            j for j_name, j in self.robot.joints.items()
-            if getattr(j, 'is_gripper', False) and j_name in self.robot.joint_relations
-        ]
+        relation_slaves = {
+            slave_id
+            for _master, slaves in self.robot.joint_relations.items()
+            for slave_id, _ in slaves
+        }
 
-        if not master_joints:
+        preferred_joint_names = getattr(self, 'active_gripper_joint_names', None) or []
+        preferred_joint_set = {
+            name for name in preferred_joint_names
+            if isinstance(name, str) and name in self.robot.joints
+        }
+
+        control_joints = []
+        for joint_name, joint in self.robot.joints.items():
+            if not getattr(joint, 'is_gripper', False):
+                continue
+            if preferred_joint_set and joint_name not in preferred_joint_set:
+                continue
+            if joint_name in self.robot.joint_relations or joint_name not in relation_slaves:
+                control_joints.append(joint)
+
+        if not control_joints and preferred_joint_set:
+            for joint_name in preferred_joint_set:
+                joint = self.robot.joints.get(joint_name)
+                if joint is None or not getattr(joint, 'is_gripper', False):
+                    continue
+                control_joints.append(joint)
+
+        if not control_joints:
             return {} if not apply else None
 
+        saved_all = {name: joint.current_value for name, joint in self.robot.joints.items()}
         targets = {}
+        gap_limits = {}
+        open_angles = {}
+        close_angles = {}
 
-        # ── Case A: Precise gap targeting via bisection ──────────────────────
-        if target_gap_world is not None:
-            # Snapshot current values so we can revert during/after bisection
-            saved = {j.name: j.current_value for j in master_joints}
-
-            for joint in master_joints:
-                lo, hi = joint.min_limit, joint.max_limit
-                best_mid = joint.current_value
-
-                for _ in range(20):
-                    mid = (lo + hi) / 2.0
-                    joint.current_value = mid
-                    # Propagate slaves for measurement
-                    for s_id, ratio in self.robot.joint_relations[joint.name]:
-                        if s_id in self.robot.joints:
-                            self.robot.joints[s_id].current_value = mid * ratio
-                    self.robot.update_kinematics()
-
-                    gap_now = self._compute_finger_gap()
-                    if gap_now is None: break
-
-                    if gap_now > target_gap_world:
-                        lo = mid
-                    else:
-                        hi = mid
-                    best_mid = mid
-
-                targets[joint.name] = best_mid
-
-            # Revert to original state (we only wanted to find the targets)
-            for j in master_joints:
-                j.current_value = saved[j.name]
-                for s_id, ratio in self.robot.joint_relations[j.name]:
-                    if s_id in self.robot.joints:
-                        self.robot.joints[s_id].current_value = saved[j.name] * ratio
+        def _restore_all():
+            for name, value in saved_all.items():
+                if name in self.robot.joints:
+                    self.robot.joints[name].current_value = value
             self.robot.update_kinematics()
 
-            if apply:
-                for j_name, val in targets.items():
-                    self.robot.joints[j_name].current_value = val
-                    for s_id, ratio in self.robot.joint_relations[j_name]:
-                        if s_id in self.robot.joints:
-                            self.robot.joints[s_id].current_value = val * ratio
-                self.robot.update_kinematics()
-                self.canvas.update_transforms(self.robot)
-                return None
-            return targets
+        def _apply_joint_and_slaves(master_joint, value):
+            master_joint.current_value = value
+            for slave_id, ratio in self.robot.joint_relations.get(master_joint.name, []):
+                if slave_id in self.robot.joints:
+                    self.robot.joints[slave_id].current_value = value * ratio
 
-        # ── Case B: Full open / close ─────────────────────────────────────────
-        for joint in master_joints:
-            target = joint.max_limit if close else joint.min_limit
-            targets[joint.name] = target
-            if apply:
-                joint.current_value = target
-                for s_id, ratio in self.robot.joint_relations[joint.name]:
-                    if s_id in self.robot.joints:
-                        self.robot.joints[s_id].current_value = target * ratio
+        def _apply_joint_targets(targets_map):
+            _restore_all()
+            for joint_name, value in targets_map.items():
+                joint = self.robot.joints.get(joint_name)
+                if joint is None:
+                    continue
+                _apply_joint_and_slaves(joint, value)
+            self.robot.update_kinematics()
+
+        def _measure_joint_limit_gap(master_joint, joint_value):
+            _restore_all()
+            _apply_joint_and_slaves(master_joint, joint_value)
+            self.robot.update_kinematics()
+            return self._compute_finger_gap()
+
+        def _measure_gap_for_alpha(alpha):
+            alpha = float(np.clip(alpha, 0.0, 1.0))
+            targets_map = {}
+            for joint in control_joints:
+                open_val = open_angles.get(joint.name, saved_all.get(joint.name, joint.current_value))
+                close_val = close_angles.get(joint.name, open_val)
+                targets_map[joint.name] = open_val + alpha * (close_val - open_val)
+            _apply_joint_targets(targets_map)
+            return self._compute_finger_gap(), targets_map
+
+        # Determine each control joint's open and close angle from measured min/max face distance.
+        for joint in control_joints:
+            lo = joint.min_limit
+            hi = joint.max_limit
+            gap_lo = _measure_joint_limit_gap(joint, lo)
+            gap_hi = _measure_joint_limit_gap(joint, hi)
+
+            if gap_lo is not None and gap_hi is not None:
+                gap_limits[joint.name] = (float(min(gap_lo, gap_hi)), float(max(gap_lo, gap_hi)))
+                if gap_hi >= gap_lo:
+                    open_angles[joint.name] = hi
+                    close_angles[joint.name] = lo
+                else:
+                    open_angles[joint.name] = lo
+                    close_angles[joint.name] = hi
+            else:
+                # Fallback: keep previous behavior if gap measurement is unavailable.
+                open_angles[joint.name] = joint.min_limit
+                close_angles[joint.name] = joint.max_limit
+
+        # If we need a specific jaw gap, solve one shared alpha for the whole pair.
+        if target_gap_world is not None:
+            gap_open, targets_open = _measure_gap_for_alpha(0.0)
+            gap_close, targets_close = _measure_gap_for_alpha(1.0)
+
+            if gap_open is not None and gap_close is not None:
+                global_min = float(min(gap_open, gap_close))
+                global_max = float(max(gap_open, gap_close))
+                gap_limits["_global"] = (global_min, global_max)
+
+                target_gap = float(np.clip(target_gap_world, global_min, global_max))
+                decreasing_with_alpha = (gap_open >= gap_close)
+                left = 0.0
+                right = 1.0
+                best_targets = targets_open if abs(gap_open - target_gap) <= abs(gap_close - target_gap) else targets_close
+                best_err = min(abs(float(gap_open) - target_gap), abs(float(gap_close) - target_gap))
+
+                for _ in range(24):
+                    mid = (left + right) / 2.0
+                    gap_mid, targets_mid = _measure_gap_for_alpha(mid)
+                    if gap_mid is None:
+                        break
+
+                    err = abs(float(gap_mid) - target_gap)
+                    if err < best_err:
+                        best_err = err
+                        best_targets = targets_mid
+                    if err <= 1e-4:
+                        break
+
+                    if decreasing_with_alpha:
+                        if gap_mid > target_gap:
+                            left = mid
+                        else:
+                            right = mid
+                    else:
+                        if gap_mid < target_gap:
+                            left = mid
+                        else:
+                            right = mid
+
+                targets = best_targets
+            else:
+                # Fallback: use geometric close/open side when shared gap is unavailable.
+                for joint in control_joints:
+                    targets[joint.name] = close_angles[joint.name] if close else open_angles[joint.name]
+        else:
+            # Pure full open/full close.
+            for joint in control_joints:
+                targets[joint.name] = close_angles[joint.name] if close else open_angles[joint.name]
+
+        _restore_all()
+        self._last_gripper_gap_limits = gap_limits
 
         if apply:
-            self.robot.update_kinematics()
+            _apply_joint_targets(targets)
             self.canvas.update_transforms(self.robot)
             return None
         return targets
@@ -935,3 +1295,4 @@ class NavigationMixin:
                 selection-background-color: #1976d2;
             }
         """)
+

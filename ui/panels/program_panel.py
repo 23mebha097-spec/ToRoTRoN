@@ -45,7 +45,11 @@ class RobotSyntaxHighlighter(QtGui.QSyntaxHighlighter):
 
         if self.lang == "command":
             # Robot command keywords
-            for kw in [r'\bJOINT\b', r'\bWAIT\b', r'\bMOVE\b', r'\bSPEED\b', r'\bHOME\b', r'\bLOOP\b']:
+            for kw in [
+                r'\bJOINT\b', r'\bWAIT\b', r'\bMOVE\b', r'\bSPEED\b',
+                r'\bGRIP\b', r'\bPICK\b', r'\bPLACE\b', r'\bPICKPLACE\b',
+                r'\bHOME\b', r'\bLOOP\b'
+            ]:
                 self.rules.append((re.compile(kw, re.IGNORECASE), keyword_fmt))
             # Comments
             self.rules.append((re.compile(r'#.*$', re.MULTILINE), comment_fmt))
@@ -218,7 +222,16 @@ class ProgramPanel(QtWidgets.QWidget):
 
         # Example templates for each language
         self.templates = {
-            "command": "# Command format: JOINT Name Angle\nJOINT Shoulder 45\nWAIT 1.0\nJOINT Shoulder -45\nWAIT 1.0\n",
+            "command": (
+                "# Commands:\n"
+                "#  JOINT <Name> <AngleDeg> [SPEED <0-100>]\n"
+                "#  MOVE <Xcm> <Ycm> <Zcm> [SPEED <0-100>]\n"
+                "#  GRIP OPEN|CLOSE\n"
+                "#  PICKPLACE <ObjectName>\n"
+                "MOVE 10 0 15 SPEED 25\n"
+                "WAIT 0.5\n"
+                "PICKPLACE Part_1\n"
+            ),
             "python": "# Python API: robot.move('Name', Angle)\nrobot.move('Shoulder', 45)\nrobot.wait(1.0)\nrobot.move('Shoulder', -45)\nrobot.wait(1.0)\n",
             "matlab": "% Matlab Syntax: joint('Name', Angle)\njoint('Shoulder', 45);\npause(1.0);\njoint('Shoulder', -45);\npause(1.0);\n"
         }
@@ -229,6 +242,81 @@ class ProgramPanel(QtWidgets.QWidget):
         self.badge_timer = QtCore.QTimer(self)
         self.badge_timer.timeout.connect(self.update_hw_badge)
         self.badge_timer.start(1000)  # Check every 1s
+
+    def _report_execution_error(self, title, line, error_text, solution_text):
+        """Show a structured execution error with a likely fix."""
+        safe_line = line.strip() if isinstance(line, str) else ""
+        if safe_line:
+            self.mw.log(f"❌ {title} | Line: {safe_line}")
+        else:
+            self.mw.log(f"❌ {title}")
+        self.mw.log(f"   Error   : {error_text}")
+        self.mw.log(f"   Solution: {solution_text}")
+        self.mw.show_toast(title, "error")
+
+    def _normalize_script_line(self, line):
+        """Removes comments and trailing semicolons from a script line."""
+        cleaned = line.strip()
+        if not cleaned:
+            return ""
+
+        if cleaned.startswith("%") or cleaned.startswith("#"):
+            return ""
+
+        # Remove inline Matlab comments.
+        if "%" in cleaned:
+            cleaned = cleaned.split("%", 1)[0].strip()
+
+        return cleaned[:-1].strip() if cleaned.endswith(";") else cleaned
+
+    def _parse_matlab_robot_line(self, line):
+        """Parse a MATLAB-style line into a robot command or an error."""
+        normalized = self._normalize_script_line(line)
+        if not normalized:
+            return None
+
+        joint_match = re.match(
+            r"^(?:joint|move)\s*\(\s*['\"](.+?)['\"]\s*,\s*(-?\d+\.?\d*)\s*\)$",
+            normalized,
+            re.IGNORECASE,
+        )
+        pause_match = re.match(
+            r"^(?:pause|wait)\s*\(\s*(-?\d+\.?\d*)\s*\)$",
+            normalized,
+            re.IGNORECASE,
+        )
+        speed_match = re.match(
+            r"^speed\s*\(\s*(-?\d+\.?\d*)\s*\)$",
+            normalized,
+            re.IGNORECASE,
+        )
+
+        if joint_match:
+            return ("JOINT", joint_match.group(1), joint_match.group(2))
+        if pause_match:
+            return ("WAIT", None, pause_match.group(1))
+        if speed_match:
+            return ("SPEED", None, speed_match.group(1))
+
+        # Also accept plain robot-style lines inside MATLAB mode.
+        command_match = re.match(
+            r"^(JOINT|WAIT|MOVE)\b\s*(.*)$",
+            normalized,
+            re.IGNORECASE,
+        )
+        if command_match:
+            cmd = command_match.group(1).upper()
+            rest = command_match.group(2).strip()
+            parts = rest.split()
+            if cmd == "JOINT" and len(parts) >= 2:
+                return (cmd, parts[0], parts[1])
+            if cmd == "WAIT" and len(parts) >= 1:
+                return (cmd, None, parts[0])
+            if cmd == "MOVE" and len(parts) >= 1:
+                return (cmd, None, rest)
+            return (cmd, None, rest)
+
+        return ("UNKNOWN", None, normalized)
 
     def init_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
@@ -531,31 +619,234 @@ class ProgramPanel(QtWidgets.QWidget):
     def run_matlab_code(self, code, sync_to_hw):
         """Simulates Matlab syntax execution."""
         lines = code.splitlines()
-        for line in lines:
+        for index, line in enumerate(lines, start=1):
             if not self.is_running: break
-            line = line.strip()
-            if not line or line.startswith("%"): continue
+            parsed = self._parse_matlab_robot_line(line)
+            if parsed is None:
+                continue
 
-            # Simple regex for joint('name', value)
-            joint_match = re.match(r"joint\s*\(['\"](.+?)['\"]\s*,\s*(-?\d+\.?\d*)\s*\);?", line, re.IGNORECASE)
-            # Simple regex for pause(value)
-            pause_match = re.match(r"pause\s*\((-?\d+\.?\d*)\s*\);?", line, re.IGNORECASE)
-
-            if joint_match:
-                name = joint_match.group(1)
-                val = joint_match.group(2)
-                self.execute_line(f"JOINT {name} {val}", force_hw_sync=sync_to_hw)
-            elif pause_match:
-                val = pause_match.group(1)
-                self.execute_line(f"WAIT {val}")
+            cmd, name, value = parsed
+            if cmd == "JOINT":
+                if not name or not value:
+                    self._report_execution_error(
+                        "MATLAB parse error",
+                        line,
+                        f"Invalid joint command on line {index}.",
+                        "Use joint('JointName', angle); or JOINT JointName angle"
+                    )
+                    self.stop_program()
+                    return
+                self.execute_line(f"JOINT {name} {value}", force_hw_sync=sync_to_hw)
+            elif cmd == "WAIT":
+                self.execute_line(f"WAIT {value}")
+            elif cmd == "MOVE":
+                self.execute_line(f"MOVE {value}", force_hw_sync=sync_to_hw)
+            elif cmd == "SPEED":
+                try:
+                    self.mw.current_speed = float(value)
+                    self.mw.show_speed_overlay()
+                    self.mw.log(f"⚡ Matlab speed override set to {float(value):.1f}%")
+                except Exception as exc:
+                    self._report_execution_error(
+                        "MATLAB speed error",
+                        line,
+                        str(exc),
+                        "Use speed(0 to 100);"
+                    )
+                    self.stop_program()
+                    return
             else:
-                self.mw.log(f"Matlab Parser: Skipping unknown line: {line}")
+                self._report_execution_error(
+                    "MATLAB parse error",
+                    line,
+                    f"Unsupported command on line {index}: {value}",
+                    "Use joint('Name', angle); pause(seconds); speed(percent); or JOINT Name angle"
+                )
+                self.stop_program()
+                return
 
     def stop_program(self):
         """Stops script execution."""
         if self.is_running:
             self.is_running = False
             self.mw.log("🛑 EXECUTION STOPPED BY USER.")
+
+    def _get_tcp_link(self):
+        sim_tab = getattr(self.mw, "simulation_tab", None)
+        if sim_tab is not None and hasattr(sim_tab, "_get_tcp_link"):
+            try:
+                return sim_tab._get_tcp_link()
+            except Exception:
+                return None
+        return None
+
+    def _cmd_grip(self, action):
+        action_u = (action or "").strip().upper()
+        if action_u not in ("OPEN", "CLOSE"):
+            self._report_execution_error(
+                "GRIP parse error",
+                f"GRIP {action}",
+                "Expected OPEN or CLOSE.",
+                "Use: GRIP OPEN  or  GRIP CLOSE"
+            )
+            return
+
+        if not hasattr(self.mw, "_control_gripper_fingers"):
+            self._report_execution_error(
+                "GRIP unsupported",
+                f"GRIP {action_u}",
+                "Main window gripper control was not found.",
+                "Open the Gripper tab and mark gripper joints, then retry."
+            )
+            return
+
+        close = (action_u == "CLOSE")
+        self.mw._control_gripper_fingers(close=close)
+        self.mw.robot.update_kinematics()
+        self.mw.canvas.update_transforms(self.mw.robot)
+        QtWidgets.QApplication.processEvents()
+
+    def _cmd_move_xyz_cm(self, x_cm, y_cm, z_cm, speed, hw_sync):
+        tcp_link = self._get_tcp_link()
+        if not tcp_link:
+            self._report_execution_error(
+                "MOVE error",
+                f"MOVE {x_cm} {y_cm} {z_cm}",
+                "No TCP (Live Point) link found.",
+                "Set a TCP in Simulation tab (Objects -> Set as Live Point), then retry."
+            )
+            return
+
+        ratio = float(getattr(self.mw.canvas, "grid_units_per_cm", 1.0))
+        target_world = [float(x_cm) * ratio, float(y_cm) * ratio, float(z_cm) * ratio]
+
+        start_vals = {n: j.current_value for n, j in self.mw.robot.joints.items()}
+        _tool_world, tool_local, _gap = self.mw.get_link_tool_point(tcp_link)
+        tol = 0.5 * ratio  # 0.5 cm
+
+        reached = self.mw.robot.inverse_kinematics(
+            target_world,
+            tcp_link,
+            max_iters=350,
+            tolerance=tol,
+            tool_offset=tool_local
+        )
+        if not reached:
+            for n, v in start_vals.items():
+                if n in self.mw.robot.joints:
+                    self.mw.robot.joints[n].current_value = v
+            self.mw.robot.update_kinematics()
+            self.mw.canvas.update_transforms(self.mw.robot)
+            self._report_execution_error(
+                "MOVE unreachable",
+                f"MOVE {x_cm} {y_cm} {z_cm}",
+                "IK solver could not reach the target within tolerance.",
+                "Try nearer coordinates, adjust TCP, or relax robot joint limits."
+            )
+            return
+
+        target_vals = {n: j.current_value for n, j in self.mw.robot.joints.items()}
+
+        for n, v in start_vals.items():
+            if n in self.mw.robot.joints:
+                self.mw.robot.joints[n].current_value = v
+        self.mw.robot.update_kinematics()
+
+        max_diff = 0.0
+        for n, v0 in start_vals.items():
+            v1 = target_vals.get(n, v0)
+            max_diff = max(max_diff, abs(v1 - v0))
+
+        speed = float(speed)
+        step_factor = max(1.0, (101.0 - max(0.0, min(100.0, speed))) / 10.0)
+        steps = int(max(6, min(80, max_diff / step_factor))) if max_diff > 0.01 else 1
+
+        if hw_sync:
+            for name, value in target_vals.items():
+                try:
+                    self.mw.serial_mgr.send_command(name, float(value), speed=speed)
+                except Exception:
+                    pass
+
+        for i in range(1, steps + 1):
+            if not self.is_running:
+                return
+            a = i / steps
+            for n, v0 in start_vals.items():
+                j = self.mw.robot.joints.get(n)
+                if j is None:
+                    continue
+                v1 = target_vals.get(n, v0)
+                j.current_value = v0 + (v1 - v0) * a
+            self.mw.robot.update_kinematics()
+            self.mw.canvas.update_transforms(self.mw.robot)
+            QtWidgets.QApplication.processEvents()
+            time.sleep(0.03)
+
+        if hasattr(self.mw, "show_speed_overlay"):
+            self.mw.show_speed_overlay()
+
+    def _cmd_pickplace(self, object_name=None):
+        sim_tab = getattr(self.mw, "simulation_tab", None)
+        if sim_tab is None or not hasattr(sim_tab, "toggle_pick_place_sim"):
+            self._report_execution_error(
+                "PICKPLACE unsupported",
+                "PICKPLACE",
+                "Simulation panel was not found.",
+                "Open the Simulation tab once, then retry."
+            )
+            return
+
+        target_item = None
+        if object_name:
+            for i in range(sim_tab.objects_list.count()):
+                it = sim_tab.objects_list.item(i)
+                if it and it.text() == object_name:
+                    target_item = it
+                    break
+            if target_item is None:
+                self._report_execution_error(
+                    "PICKPLACE error",
+                    f"PICKPLACE {object_name}",
+                    f"Object '{object_name}' not found in Simulation Objects list.",
+                    "Import the object in Simulation tab or use the exact name from the list."
+                )
+                return
+        else:
+            target_item = sim_tab.objects_list.currentItem()
+            if target_item is None:
+                self._report_execution_error(
+                    "PICKPLACE error",
+                    "PICKPLACE",
+                    "No simulation object selected.",
+                    "Select an object in Simulation tab, or run: PICKPLACE <ObjectName>."
+                )
+                return
+
+        sim_tab.objects_list.setCurrentItem(target_item)
+        try:
+            self.mw.on_sim_object_clicked(target_item)
+        except Exception:
+            pass
+
+        if hasattr(sim_tab, "start_btn"):
+            sim_tab.start_btn.blockSignals(True)
+            sim_tab.start_btn.setChecked(True)
+            sim_tab.start_btn.blockSignals(False)
+
+        sim_tab.toggle_pick_place_sim(True)
+        if not getattr(sim_tab, "is_sim_active", False):
+            return
+
+        while getattr(sim_tab, "is_sim_active", False) and self.is_running:
+            QtWidgets.QApplication.processEvents()
+            time.sleep(0.05)
+
+        if getattr(sim_tab, "is_sim_active", False) and not self.is_running:
+            try:
+                sim_tab.toggle_pick_place_sim(False)
+            except Exception:
+                pass
 
     def execute_line(self, line, force_hw_sync=False):
         """Core parsing and execution logic for a single line of code."""
@@ -588,6 +879,37 @@ class ProgramPanel(QtWidgets.QWidget):
                         self.mw.log(f"⚠️ Invalid speed value: {parts[s_idx+1]}")
                 # Clean parts so the rest of the parsing (JOINT, WAIT, etc.) ignores the speed suffix
                 parts = parts[:s_idx]
+
+            # Extra commands (handled before legacy JOINT/WAIT parsing)
+            cmd0 = parts[0].upper()
+            if cmd0 == "MOVE":
+                if len(parts) < 4:
+                    self._report_execution_error(
+                        "MOVE parse error",
+                        original_line,
+                        "MOVE needs X Y Z in centimeters.",
+                        "Use: MOVE 10 0 15"
+                    )
+                    return
+                self._cmd_move_xyz_cm(parts[1], parts[2], parts[3], speed=speed, hw_sync=hw_sync)
+                return
+
+            if cmd0 == "GRIP":
+                if len(parts) < 2:
+                    self._report_execution_error(
+                        "GRIP parse error",
+                        original_line,
+                        "Missing OPEN/CLOSE.",
+                        "Use: GRIP OPEN  or  GRIP CLOSE"
+                    )
+                    return
+                self._cmd_grip(parts[1])
+                return
+
+            if cmd0 in ("PICKPLACE", "PICK_AND_PLACE"):
+                obj = parts[1] if len(parts) >= 2 else None
+                self._cmd_pickplace(obj)
+                return
 
             # 2. Identify Command and Joint Name
             cmd = parts[0].upper()
@@ -681,11 +1003,11 @@ class ProgramPanel(QtWidgets.QWidget):
                     QtWidgets.QApplication.processEvents()
                     time.sleep(0.05)
 
-            elif cmd == "MOVE":
-                self.mw.log(f"CMD: {original_line} (IK implementation pending)")
-
         except Exception as e:
-            self.mw.log(f"Error executing line: {line} -> {str(e)}")
+            solution = "Check the joint name, angle format, and whether the value stays within joint limits."
+            if "outside limits" in str(e).lower():
+                solution = "Reduce the angle so it stays within the joint's min/max limits."
+            self._report_execution_error("Execution error", line, str(e), solution)
 
     def update_hw_badge(self):
         """Syncs the badge color with the physical SerialManager state and liveness."""

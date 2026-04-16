@@ -1,5 +1,4 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
-from graphics.canvas import RobotCanvas
 from core.robot import Robot
 from ui.panels.align_panel import AlignPanel
 from ui.panels.joint_panel import JointPanel
@@ -11,6 +10,7 @@ from core.serial_manager import SerialManager
 import os
 import numpy as np
 import random
+import traceback
 from ui.widgets.code_drawer import CodeDrawer
 from core.firmware_gen import generate_esp32_firmware
 
@@ -32,8 +32,9 @@ class TypeOnlySpinBox(QtWidgets.QSpinBox):
 class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin, NavigationMixin):
     log_signal = QtCore.pyqtSignal(str)
     
-    def __init__(self):
+    def __init__(self, enable_3d: bool = True):
         super().__init__()
+        self.enable_3d = enable_3d
         self.setWindowTitle("ToRoTRoN - Programmable 3-D Robotic Assembly")
         self.resize(1200, 800)
         
@@ -259,103 +260,20 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         self.right_splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
         
         # --- CANVAS AREA ---
-        self.canvas = RobotCanvas()
-        
-        # Add a floating Isometric View button directly to the canvas
-        # We use a white circular button with a 'Home' icon
-        self.iso_btn = QtWidgets.QPushButton(self.canvas)
-        self.iso_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_ComputerIcon))
-        self.iso_btn.setToolTip("Reset to Isometric View")
-        self.iso_btn.setFixedSize(38, 38)
-        self.iso_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        self.iso_btn.setStyleSheet("""
-            QPushButton {
-                background-color: white;
-                border: 2px solid #e0e0e0;
-                border-radius: 19px;
-                padding: 6px;
-            }
-            QPushButton:hover {
-                background-color: #f5f5f5;
-                border-color: #1976d2;
-            }
-            QPushButton:pressed {
-                background-color: #e3f2fd;
-            }
-        """)
-        self.iso_btn.clicked.connect(lambda: self.canvas.view_isometric())
-        
-        # --- Focus Point Button (next to isometric) ---
-        self.focus_btn = QtWidgets.QPushButton(self.canvas)
-        self.focus_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_DialogApplyButton))
-        self.focus_btn.setToolTip("Set Focus Point - click a surface to zoom in")
-        self.focus_btn.setFixedSize(38, 38)
-        self.focus_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        self.focus_btn.setStyleSheet("""
-            QPushButton {
-                background-color: white;
-                border: 2px solid #e0e0e0;
-                border-radius: 19px;
-                padding: 6px;
-            }
-            QPushButton:hover {
-                background-color: #f5f5f5;
-                border-color: #1976d2;
-            }
-            QPushButton:pressed {
-                background-color: #e3f2fd;
-            }
-        """)
-        self.focus_btn.clicked.connect(lambda: self.canvas.start_focus_point_picking())
-        
-        # --- Floating Import Object Button (upper-left of canvas) ---
-        # REMOVED: Moved to Simulation Panel sidebar
-        
-        # --- Simulation Objects Toggle Button (bottom-right of canvas) ---
-        # REMOVED: Moved to Simulation Panel sidebar
-        
-        # --- Simulation Objects Popup Panel ---
-        # REMOVED: Moved to Simulation Panel sidebar
-        
-        # REMOVED: Simulation Panel moved to sidebar
-        
-        # --- Gripper Surface Button (bottom-right of canvas) ---
-        self.gripper_surface_btn = QtWidgets.QPushButton("Select Gripper Surface", self.canvas)
-        self.gripper_surface_btn.setToolTip("Click to select the inner surface of the gripper for contact")
-        self.gripper_surface_btn.setFixedSize(160, 40)
-        self.gripper_surface_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        self.gripper_surface_btn.setStyleSheet("""
-            QPushButton {
-                background-color: white;
-                color: #2e7d32;
-                border: 2px solid #4caf50;
-                border-radius: 8px;
-                font-weight: bold;
-                font-size: 13px;
-                padding: 5px;
-            }
-            QPushButton:hover {
-                background-color: #e8f5e9;
-            }
-            QPushButton:pressed {
-                background-color: #c8e6c9;
-            }
-        """)
-        self.gripper_surface_btn.clicked.connect(self.joint_tab.on_select_gripper_surface)
-        self.gripper_surface_btn.setVisible(False)  # Only visible in Joint Mode
+        self.canvas = None
+        self.canvas_container = QtWidgets.QWidget()
+        self.canvas_container.setStyleSheet("background-color: #fafafa;")
+        self.canvas_container_layout = QtWidgets.QVBoxLayout(self.canvas_container)
+        self.canvas_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.canvas_container_layout.setSpacing(0)
 
-        # Initial positions
-        # Sidebar handles everything now
-        original_resize = self.canvas.resizeEvent
-        def patched_resize(event):
-            original_resize(event)
-            self.iso_btn.move(self.canvas.width() - 160, 24)
-            self.focus_btn.move(self.canvas.width() - 160, 68)
-            self.gripper_surface_btn.move(self.canvas.width() - 180, self.canvas.height() - 60)
-        
-        self.canvas.resizeEvent = patched_resize
-        
-        self.right_splitter.addWidget(self.canvas)
+        self.canvas_status = QtWidgets.QLabel("Loading 3D engine...")
+        self.canvas_status.setAlignment(QtCore.Qt.AlignCenter)
+        self.canvas_status.setStyleSheet(
+            "color: #616161; font-size: 14px; font-family: 'Segoe UI', Roboto, sans-serif;"
+        )
+        self.canvas_container_layout.addWidget(self.canvas_status, 1)
+        self.right_splitter.addWidget(self.canvas_container)
         
         self.console = QtWidgets.QTextEdit()
         self.console.setReadOnly(True)
@@ -504,11 +422,117 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         self.main_splitter.setSizes([350, 850, 0])
         
         self.main_layout.addWidget(self.main_splitter)
-        
-        # 3D View Callbacks
-        self.canvas.on_drop_callback = self.sync_link_transform
-        self.canvas.on_drop_callback = self.sync_link_transform
-        self.canvas.on_deselect_callback = self.on_deselect
+
+        self._left_container = left_container
+        self._left_container.setEnabled(False)
+
+        if self.enable_3d:
+            QtCore.QTimer.singleShot(0, self._init_canvas)
+        else:
+            self._set_canvas_error("3D disabled (run with --no-3d / TOROTRON_NO_3D=1).")
+
+    def _set_canvas_error(self, message: str, details: str | None = None):
+        self.canvas_status.setText(message if not details else f"{message}\n\n{details}")
+
+    def _init_canvas(self):
+        try:
+            from graphics.canvas import RobotCanvas
+
+            canvas = RobotCanvas()
+            canvas.mw = self
+
+            self.canvas_container_layout.removeWidget(self.canvas_status)
+            self.canvas_status.setParent(None)
+            self.canvas_container_layout.addWidget(canvas, 1)
+
+            self.canvas = canvas
+            self._left_container.setEnabled(True)
+
+            self.iso_btn = QtWidgets.QPushButton(self.canvas)
+            self.iso_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_ComputerIcon))
+            self.iso_btn.setToolTip("Reset to Isometric View")
+            self.iso_btn.setFixedSize(38, 38)
+            self.iso_btn.setCursor(QtCore.Qt.PointingHandCursor)
+            self.iso_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: white;
+                    border: 2px solid #e0e0e0;
+                    border-radius: 19px;
+                    padding: 6px;
+                }
+                QPushButton:hover {
+                    background-color: #f5f5f5;
+                    border-color: #1976d2;
+                }
+                QPushButton:pressed {
+                    background-color: #e3f2fd;
+                }
+            """)
+            self.iso_btn.clicked.connect(lambda: self.canvas.view_isometric())
+
+            # --- Focus Point Button (next to isometric) ---
+            self.focus_btn = QtWidgets.QPushButton(self.canvas)
+            self.focus_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_DialogApplyButton))
+            self.focus_btn.setToolTip("Set Focus Point - click a surface to zoom in")
+            self.focus_btn.setFixedSize(38, 38)
+            self.focus_btn.setCursor(QtCore.Qt.PointingHandCursor)
+            self.focus_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: white;
+                    border: 2px solid #e0e0e0;
+                    border-radius: 19px;
+                    padding: 6px;
+                }
+                QPushButton:hover {
+                    background-color: #f5f5f5;
+                    border-color: #1976d2;
+                }
+                QPushButton:pressed {
+                    background-color: #e3f2fd;
+                }
+            """)
+            self.focus_btn.clicked.connect(lambda: self.canvas.start_focus_point_picking())
+
+            # --- Gripper Surface Button (bottom-right of canvas) ---
+            self.gripper_surface_btn = QtWidgets.QPushButton("Select Gripper Surface", self.canvas)
+            self.gripper_surface_btn.setToolTip("Click to select the inner surface of the gripper for contact")
+            self.gripper_surface_btn.setFixedSize(160, 40)
+            self.gripper_surface_btn.setCursor(QtCore.Qt.PointingHandCursor)
+            self.gripper_surface_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: white;
+                    color: #2e7d32;
+                    border: 2px solid #4caf50;
+                    border-radius: 8px;
+                    font-weight: bold;
+                    font-size: 13px;
+                    padding: 5px;
+                }
+                QPushButton:hover {
+                    background-color: #e8f5e9;
+                }
+                QPushButton:pressed {
+                    background-color: #c8e6c9;
+                }
+            """)
+            self.gripper_surface_btn.clicked.connect(self.joint_tab.on_select_gripper_surface)
+            self.gripper_surface_btn.setVisible(False)  # Only visible in Joint Mode
+
+            original_resize = self.canvas.resizeEvent
+
+            def patched_resize(event):
+                original_resize(event)
+                self.iso_btn.move(self.canvas.width() - 160, 24)
+                self.focus_btn.move(self.canvas.width() - 160, 68)
+                self.gripper_surface_btn.move(self.canvas.width() - 180, self.canvas.height() - 60)
+
+            self.canvas.resizeEvent = patched_resize
+
+            self.canvas.on_drop_callback = self.sync_link_transform
+            self.canvas.on_deselect_callback = self.on_deselect
+        except Exception:
+            self._left_container.setEnabled(False)
+            self._set_canvas_error("Failed to initialize 3D engine.", traceback.format_exc())
 
 
 

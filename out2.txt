@@ -1,0 +1,36 @@
+EXIT:1
+
+=================================================================
+  PICK & PLACE STATUS  :  SUCCESS
+  OBJECT ORIENTATION   :  Roll=5.7?  Pitch=5.7?  Yaw=17.2?
+  ORIENTATION POLICY   :  LOCKED ? identical at pick AND place
+  TRANSFER STRATEGY    :  Quadrant-aware radial rotation
+=================================================================
+[HOME] Joints: [ 0.    -1.571  1.571 -1.571 -1.571  0.   ]
+[PRE-PICK] Joints=[-2.806 -1.561  2.084  1.145 -1.674  1.535] | Pos err=0.43 mm | Ori LOCKED @Roll=5.7? Pitch=5.7? Yaw=17.2?
+[APPROACH] Joints=[-2.806 -1.386  2.211  0.843 -1.674  1.535] | Pos err=0.54 mm | Ori LOCKED @Roll=5.7? Pitch=5.7? Yaw=17.2?
+[GRASP] Gripper CLOSED | Orientation: Roll=5.7? Pitch=5.7? Yaw=17.2?
+[LIFT] Joints=[-2.806 -1.559  2.084  1.142 -1.674  1.535] | Pos err=0.94 mm | Ori LOCKED @Roll=5.7? Pitch=5.7? Yaw=17.2?
+2026-04-14 14:19:59,075 - INFO - Starting Sequence Execution...
+2026-04-14 14:19:59,075 - INFO - [ORIENTATION LOCK] Roll=5.7? Pitch=5.7? Yaw=17.2? ? fixed for ALL waypoints
+2026-04-14 14:19:59,076 - INFO - [QUADRANT ROUTER] Route: Q++ \u2192 Q-+ (radial) \u2192 Q-- (final)
+2026-04-14 14:19:59,076 - INFO - [QUADRANT ROUTER] Transfer legs: 2
+2026-04-14 14:19:59,076 - INFO -   \u2514\u2500 Rotate+Translate       \u2192 XY=(-0.200, 0.200)  [TRANSFER-LEG1 (radial rotate \u2192 Q-+ nearest intermediate)]
+2026-04-14 14:19:59,076 - INFO -   \u2514\u2500 Final move             \u2192 XY=(-0.200, -0.300)  [TRANSFER-FINAL]
+2026-04-14 14:19:59,076 - INFO - [HOME] Moved to Home joints
+2026-04-14 14:19:59,081 - INFO - [PRE-PICK] \u2192 XYZ=[0.2 0.2 0.5] | Ori=Roll=5.7? Pitch=5.7? Yaw=17.2? [LOCKED] | Pos err=0.43 mm
+2026-04-14 14:19:59,086 - INFO - [APPROACH] \u2192 XYZ=[0.2 0.2 0.4] | Ori=Roll=5.7? Pitch=5.7? Yaw=17.2? [LOCKED] | Pos err=0.54 mm
+2026-04-14 14:19:59,086 - INFO - [GRIPPER] CLOSE | Confirmed
+2026-04-14 14:19:59,089 - INFO - [LIFT] \u2192 XYZ=[0.2 0.2 0.5] | Ori=Roll=5.7? Pitch=5.7? Yaw=17.2? [LOCKED] | Pos err=0.94 mm
+2026-04-14 14:19:59,096 - INFO - [TRANSFER-LEG1 (radial rotate \u2192 Q-+ nearest intermediate)] \u2192 XYZ=[-0.2  0.2  0.5] | Ori=Roll=5.7? Pitch=5.7? Yaw=17.2? [LOCKED] | Pos err=0.59 mm
+2026-04-14 14:19:59,101 - INFO - [TRANSFER-FINAL] \u2192 XYZ=[-0.2 -0.3  0.5] | Ori=Roll=5.7? Pitch=5.7? Yaw=17.2? [LOCKED] | Pos err=0.72 mm
+2026-04-14 14:19:59,106 - INFO - [PLACE] \u2192 XYZ=[-0.2  -0.3   0.35] | Ori=Roll=5.7? Pitch=5.7? Yaw=17.2? [LOCKED] | Pos err=0.75 mm
+2026-04-14 14:19:59,107 - INFO - [GRIPPER] OPEN | Confirmed
+2026-04-14 14:19:59,110 - INFO - [RETRACT] \u2192 XYZ=[-0.2 -0.3  0.5] | Ori=Roll=5.7? Pitch=5.7? Yaw=17.2? [LOCKED] | Pos err=0.70 mm
+2026-04-14 14:19:59,110 - INFO - [RETURN] Moved to Home joints
+Traceback (most recent call last):
+  File "C:\Users\Bhavin\ToRoTRoN\industrial_pick_place.py", line 438, in <module>
+    print(log)
+  File "C:\Users\Bhavin\AppData\Local\Programs\Python\Python310\lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2192' in position 30: character maps to <undefined>

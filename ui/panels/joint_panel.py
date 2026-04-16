@@ -96,15 +96,9 @@ class JointPanel(QtWidgets.QWidget):
         """)
         name_layout.addWidget(self.joint_name_input)
         rot_layout.addLayout(name_layout)
-        
-        # --- NEW: Industrial Gripper Option ---
+        # Live Point button (for joints marked as gripper in the Gripper tab)
         gripper_row = QtWidgets.QHBoxLayout()
-        self.gripper_checkbox = QtWidgets.QCheckBox("Gripper Joint")
-        self.gripper_checkbox.setToolTip("Mark this joint as an industrial gripper for Pick and Place logic")
-        self.gripper_checkbox.setStyleSheet("color: #2e7d32; font-weight: bold; font-size: 13px;")
-        gripper_row.addWidget(self.gripper_checkbox)
-        
-        self.set_lp_btn = QtWidgets.QPushButton("🎯 Set Live Point")
+        self.set_lp_btn = QtWidgets.QPushButton("Set Live Point")
         self.set_lp_btn.setFixedWidth(140)
         self.set_lp_btn.setVisible(False)
         self.set_lp_btn.setCursor(QtCore.Qt.PointingHandCursor)
@@ -124,10 +118,6 @@ class JointPanel(QtWidgets.QWidget):
         gripper_row.addWidget(self.set_lp_btn)
         gripper_row.addStretch()
         rot_layout.addLayout(gripper_row)
-        
-        # Toggle button visibility
-        self.gripper_checkbox.toggled.connect(self.set_lp_btn.setVisible)
-        self.gripper_checkbox.toggled.connect(self.on_gripper_toggle_sync)
         
         # Axis selection
         axis_label = QtWidgets.QLabel("Select rotation axis:")
@@ -768,31 +758,6 @@ class JointPanel(QtWidgets.QWidget):
             if hasattr(self.mw, 'matrices_tab'):
                 self.mw.matrices_tab.refresh_sliders()
                 self.mw.matrices_tab.update_display()
-
-    def on_gripper_toggle_sync(self, checked):
-        """Sync the gripper status to the Gripper tab."""
-        if not self.selected_object: return
-        
-        # Find the joint associated with this object
-        joint_name = None
-        for jn, j in self.mw.robot.joints.items():
-            if j.child_link.name == self.selected_object:
-                joint_name = jn
-                break
-        
-        if joint_name:
-            self.mw.robot.joints[joint_name].is_gripper = checked
-            # Refresh Gripper Tab list if visible
-            if hasattr(self.mw, 'gripper_tab'):
-                self.mw.gripper_tab.refresh_joints()
-                # If the gripper tab is currently selecting this joint, sync its checkbox
-                items = self.mw.gripper_tab.joints_list.findItems(joint_name, QtCore.Qt.MatchExactly)
-                if items:
-                    self.mw.gripper_tab.joints_list.setCurrentItem(items[0])
-                    self.mw.gripper_tab.mark_gripper_check.blockSignals(True)
-                    self.mw.gripper_tab.mark_gripper_check.setChecked(checked)
-                    self.mw.gripper_tab.mark_gripper_check.blockSignals(False)
-
     def select_object(self, name):
         """Selection logic for external calls"""
         self.selected_object = name
@@ -977,12 +942,13 @@ class JointPanel(QtWidgets.QWidget):
         self.joint_control_spinbox.setRange(joint_data['min'], joint_data['max'])
         self.joint_control_spinbox.setValue(joint_data['current_angle'])
         self.joint_control_spinbox.blockSignals(False)
-        
-        # Support Gripper state
-        self.gripper_checkbox.blockSignals(True)
-        self.gripper_checkbox.setChecked(joint_data.get('is_gripper', False))
-        self.gripper_checkbox.blockSignals(False)
-        self.set_lp_btn.setVisible(self.gripper_checkbox.isChecked())
+
+        # Show live-point button only for gripper joints.
+        is_gripper_joint = bool(joint_data.get('is_gripper', False))
+        joint_id = joint_data.get('joint_id')
+        if joint_id in self.mw.robot.joints:
+            is_gripper_joint = bool(getattr(self.mw.robot.joints[joint_id], 'is_gripper', is_gripper_joint))
+        self.set_lp_btn.setVisible(is_gripper_joint)
         
         # 5. Visual Indicators
         self.alignment_point = joint_data.get('alignment_point')
@@ -1224,10 +1190,24 @@ class JointPanel(QtWidgets.QWidget):
             'alignment_point': self.alignment_point.tolist() if isinstance(self.alignment_point, np.ndarray) else self.alignment_point,
             'custom_name': custom_name,
             'joint_id': joint_id,
-            'is_gripper': self.gripper_checkbox.isChecked()
+            'is_gripper': False,
+            'contact_surface_name': None,
+            'contact_surface_link': None,
+            'contact_surface_center_local': None,
+            'contact_surface_normal_local': None,
+            'gripping_surface_name': None,
+            'gripping_surface_link': None,
+            'gripping_surface_center_local': None,
+            'gripping_surface_normal_local': None,
+            'paired_gripping_enabled': False,
+            'paired_gripping_surface_joint_name': None,
+            'paired_gripping_surface_name': None,
+            'paired_gripping_surface_link': None,
+            'paired_gripping_surface_center_local': None,
+            'paired_gripping_surface_normal_local': None
         }
         # Update robot model class
-        joint.is_gripper = self.gripper_checkbox.isChecked()
+        joint.is_gripper = False
         
         ratio = self.mw.canvas.grid_units_per_cm
         pivot_cm = pivot_local / ratio
@@ -1394,6 +1374,7 @@ class JointPanel(QtWidgets.QWidget):
         
         self.axis_section.setVisible(False)
         self.rotation_section.setVisible(False)
+        self.set_lp_btn.setVisible(False)
         
         self.refresh_links()
         self.mw.log("Joint creation complete. Ready for next joint.")
@@ -1439,15 +1420,150 @@ class JointPanel(QtWidgets.QWidget):
             
             self.objects_list.addItem(item)
 
-    def on_select_gripper_surface(self):
-        """Callback for the Gripper Surface button on the canvas. Prepares for surface picking."""
-        self.mw.log("Gripper Surface Selection Mode: Please click the inner surface of the gripper in the 3D view.")
-        self.mw.show_toast("Select Gripper Inner Surface", "success")
-        
-        # If there's a canvas method for picking (like focus point), we can call it here.
-        # For now, we prepare the system for the feature integration.
-        if hasattr(self.mw.canvas, 'start_gripper_surface_picking'):
-            self.mw.canvas.start_gripper_surface_picking()
+    def _resolve_surface_joint_id(self, joint_id=None):
+        """Resolve a usable joint id for contact-surface picking."""
+        if isinstance(joint_id, bool):
+            joint_id = None
+
+        if joint_id and joint_id in self.mw.robot.joints:
+            return joint_id
+
+        candidates = []
+        if self.child_object:
+            candidates.append(self.child_object)
+        if self.active_joint_control:
+            candidates.append(self.active_joint_control)
+
+        for child_name in candidates:
+            joint_data = self.joints.get(child_name, {})
+            candidate_id = joint_data.get('joint_id')
+            if candidate_id in self.mw.robot.joints:
+                return candidate_id
+
+        return None
+
+    def _get_joint_surface_links(self, joint):
+        """Collect the selectable link names for a gripper contact surface."""
+        if not joint or not joint.child_link:
+            return set()
+
+        allowed = set()
+        stack = [joint.child_link]
+        while stack:
+            link = stack.pop()
+            if link.name in allowed:
+                continue
+            allowed.add(link.name)
+            for child_joint in link.child_joints:
+                if child_joint.child_link is not None:
+                    stack.append(child_joint.child_link)
+        return allowed
+
+    def _store_gripper_surface_selection(self, joint_id, link_name, world_center, world_normal):
+        """Store the picked contact surface in the joint's local coordinates."""
+        joint = self.mw.robot.joints.get(joint_id)
+        picked_link = self.mw.robot.links.get(link_name)
+        if not joint or not picked_link:
+            return None
+
+        inv_world = np.linalg.inv(picked_link.t_world)
+        local_center = (inv_world @ np.append(world_center, 1.0))[:3]
+
+        local_normal = picked_link.t_world[:3, :3].T @ np.array(world_normal, dtype=float)
+        normal_norm = np.linalg.norm(local_normal)
+        if normal_norm > 1e-9:
+            local_normal = local_normal / normal_norm
+
+        joint.contact_surface_link_name = link_name
+        joint.contact_surface_center_local = local_center
+        joint.contact_surface_normal_local = local_normal
+        joint.contact_surface_name = None
+
+        joint_cache = self.joints.get(joint.child_link.name)
+        if joint_cache is not None:
+            joint_cache['contact_surface_name'] = None
+            joint_cache['contact_surface_link'] = link_name
+            joint_cache['contact_surface_center_local'] = local_center.tolist()
+            joint_cache['contact_surface_normal_local'] = local_normal.tolist()
+
+        return {
+            'joint_id': joint_id,
+            'link_name': link_name,
+            'world_center': np.array(world_center, dtype=float),
+            'world_normal': np.array(world_normal, dtype=float),
+            'local_center': local_center,
+            'local_normal': local_normal,
+            'surface_name': None
+        }
+
+    def on_select_gripper_surface(self, joint_id=None, on_surface_picked=None):
+        """Start face picking for a selected gripper joint."""
+        joint_id = self._resolve_surface_joint_id(joint_id)
+        if not joint_id:
+            self.mw.log("Select a gripper joint first before choosing a contact surface.")
+            self.mw.show_toast("Select a gripper joint first", "warning")
+            return False
+
+        joint = self.mw.robot.joints.get(joint_id)
+        if joint is None:
+            self.mw.log("The selected gripper joint could not be found.")
+            self.mw.show_toast("Joint not found", "error")
+            return False
+
+        if not getattr(joint, 'is_gripper', False):
+            self.mw.log("Mark the joint as Gripper before selecting a contact surface.")
+            self.mw.show_toast("Mark it as Gripper first", "warning")
+            return False
+
+        allowed_links = self._get_joint_surface_links(joint)
+        if not allowed_links:
+            self.mw.log("No gripper links are available for contact-surface picking.")
+            self.mw.show_toast("No gripper links available", "warning")
+            return False
+
+        allowed_label = ", ".join(sorted(allowed_links))
+        self.mw.log(f"Contact Surface Selection: Click a face on {allowed_label}.")
+        self.mw.show_toast("Click a gripper contact surface", "info")
+
+        def handle_surface_pick(link_name, world_center, world_normal):
+            if link_name not in allowed_links:
+                self.mw.log(f"Pick a surface on the selected gripper links only: {allowed_label}.")
+                self.mw.show_toast("Pick a surface on the selected gripper", "warning")
+                QtCore.QTimer.singleShot(
+                    0,
+                    lambda: self.mw.canvas.start_face_picking(handle_surface_pick, color="green")
+                )
+                return
+
+            saved_surface = self._store_gripper_surface_selection(
+                joint_id, link_name, world_center, world_normal
+            )
+            if saved_surface is None:
+                self.mw.log("Failed to store the selected gripper contact surface.")
+                self.mw.show_toast("Unable to save surface", "error")
+                return
+
+            if hasattr(self.mw, 'gripper_tab'):
+                self.mw.gripper_tab.sync_surface_from_pick(saved_surface)
+
+            ratio = getattr(self.mw.canvas, 'grid_units_per_cm', 1.0) or 1.0
+            center_cm = saved_surface['world_center'] / ratio
+            center_str = ", ".join(f"{coord:.2f}" for coord in center_cm)
+            surface_name = saved_surface.get('surface_name')
+            surface_label = f" [{surface_name}]" if surface_name else ""
+            self.mw.log(
+                f"Contact surface saved for '{joint.name}' on '{link_name}'{surface_label} at ({center_str}) cm."
+            )
+            self.mw.show_toast("Contact surface saved", "success")
+
+            if callable(on_surface_picked):
+                on_surface_picked(saved_surface)
+
+            if hasattr(self.mw, 'gripper_tab'):
+                self.mw.gripper_tab.refresh_contact_surface_ui(joint_id)
+
+        self.mw.canvas.start_face_picking(handle_surface_pick, color="green")
+        return True
 
     def on_set_live_point(self):
         """Callback for 'Set Live Point' button. Activates point picking."""
@@ -1480,4 +1596,6 @@ class JointPanel(QtWidgets.QWidget):
         
         # Update UI display in Simulation/Main via update_live_ui
         self.mw.update_live_ui()
+
+
 

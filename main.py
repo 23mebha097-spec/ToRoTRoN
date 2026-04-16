@@ -1,4 +1,5 @@
 import sys
+import os
 from PyQt5 import QtWidgets
 from ui.main_window import MainWindow
 
@@ -28,9 +29,11 @@ def main():
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")
     
-    print("[2/3] Loading 3D Engine & UI...")
+    no_3d = ("--no-3d" in sys.argv) or (os.getenv("TOROTRON_NO_3D", "").strip().lower() in {"1", "true", "yes", "on"})
+
+    print("[2/3] Loading UI...")
     try:
-        window = MainWindow()
+        window = MainWindow(enable_3d=not no_3d)
         window.show()
         
         print("[3/3] Application Ready.")
