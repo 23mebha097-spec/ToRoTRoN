@@ -12,3 +12,7 @@ ENV/
 *.log
 *.pot
 *.pyc
+
+# Local Arduino CLI/runtime package cache and generated build outputs
+.arduino_runtime/
+.build/

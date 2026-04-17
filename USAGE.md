@@ -29,6 +29,16 @@ cd c:\Users\Bhavin\ToRoTRoN
 python main.py
 ```
 
+### Method 3: Auto Reload During Development
+```powershell
+cd c:\Projects\ToRotron
+python main.py --watch
+```
+
+Use this mode while coding. The app restarts automatically when Python, UI, or style files change, so you do not need to rerun manually.
+
+To stop watch mode, press `Ctrl+C`.
+
 ## Quick Test (Verify No Crashes)
 ```bash
 .venv\Scripts\python.exe test_app_launch.py

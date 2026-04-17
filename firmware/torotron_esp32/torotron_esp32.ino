@@ -12,16 +12,13 @@
  *                speed_pct  — float, 0-100 %
  *
  *  Joints (6 independent):
- *    joint_01_02  SERVO     PWM=4
- *    joint_04_05  SERVO     PWM=11
- *    joint_05_06  SERVO     PWM=12
- *    joint_06_07  SERVO     PWM=13
- *    joint_02_03  STEPPER   STEP=5, DIR=6, EN=7
- *    joint_03_04  STEPPER   STEP=8, DIR=9, EN=10
+ *    j1  SERVO     PWM=4
+ *    j2  SERVO     PWM=5
+ *    j3  SERVO     PWM=6
+ *    j4  SERVO     PWM=7
+ *    j5  SERVO     PWM=8
+ *    j6  SERVO     PWM=9
  *
- *  Stepper config : 200 steps/rev × ×16 micro-step
- *                   8.8889 steps/degree
- *                   Max speed: 3200 steps/s
  */
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S3)
@@ -30,15 +27,11 @@
 #endif
 
 #include <ESP32Servo.h>
-#include <AccelStepper.h>
 
-// ── Stepper motion constants ───────────────────────────────
-#define STEPS_PER_DEG  8.8889f
-#define MAX_SPEED_SPS  3200.0f
-#define ACCEL_SPS2     1600.0f
-
-#define NUM_SERVO_JOINTS   4
-#define NUM_STEPPER_JOINTS 2
+#define NUM_SERVO_JOINTS   6
+#define NUM_STEPPER_JOINTS 0
+#define SERIAL_LINE_BUF    96
+#define CONTROL_PERIOD_MS  8
 
 // ── Servo joints ───────────────────────────────────────────
 struct ServoJoint {
@@ -54,31 +47,16 @@ struct ServoJoint {
 
 ServoJoint sJoints[NUM_SERVO_JOINTS];
 
-// ── Stepper joints ─────────────────────────────────────────
-struct StepperJoint {
-  AccelStepper stepper;
-  const char*  name;
-  float        target_deg;
-  float        speed_pct;
-  int          step_pin;
-  int          dir_pin;
-  int          en_pin;
-  float        min_limit;
-  float        max_limit;
-};
-
-// AccelStepper cannot be aggregate-initialised; initialise in setup()
-AccelStepper _rawSteppers[NUM_STEPPER_JOINTS] = {
-  AccelStepper(AccelStepper::DRIVER, 5, 6),  // joint_02_03
-  AccelStepper(AccelStepper::DRIVER, 8, 9)  // joint_03_04
-};
-StepperJoint stJoints[NUM_STEPPER_JOINTS];
+char serialLine[SERIAL_LINE_BUF];
+uint8_t serialLinePos = 0;
+unsigned long lastControlTick = 0;
 
 // ═══════════════════════════════════════════════════════════════
 void setup() {
   Serial.begin(115200);
   delay(300);
   Serial.println("\n--- ToRoTRoN ESP32-S3 BOOTING ---");
+  Serial.println("BOOT:ESP32-S3");
 
   // Allocate LEDC timer channels for ESP32Servo
   ESP32PWM::allocateTimer(0);
@@ -86,8 +64,8 @@ void setup() {
   ESP32PWM::allocateTimer(2);
   ESP32PWM::allocateTimer(3);
 
-  // ── Servo [0]: joint_01_02  (GPIO 4)
-  sJoints[0].name        = "joint_01_02";
+  // ── Servo [0]: j1  (GPIO 4)
+  sJoints[0].name        = "j1";
   sJoints[0].pin         = 4;
   sJoints[0].current_deg = 0.0f;
   sJoints[0].target_deg  = 0.0f;
@@ -98,76 +76,69 @@ void setup() {
   sJoints[0].servo.attach(4, 500, 2400);    // 500-2400 µs pulse range
   sJoints[0].servo.write(90);           // Move to home position
 
-  // ── Servo [1]: joint_04_05  (GPIO 11)
-  sJoints[1].name        = "joint_04_05";
-  sJoints[1].pin         = 11;
+  // ── Servo [1]: j2  (GPIO 5)
+  sJoints[1].name        = "j2";
+  sJoints[1].pin         = 5;
   sJoints[1].current_deg = 0.0f;
   sJoints[1].target_deg  = 0.0f;
   sJoints[1].speed_pct   = 50.0f;
   sJoints[1].min_limit   = -90.0f;
   sJoints[1].max_limit   = 90.0f;
   sJoints[1].servo.setPeriodHertz(50);          // Standard 50 Hz PWM
-  sJoints[1].servo.attach(11, 500, 2400);    // 500-2400 µs pulse range
+  sJoints[1].servo.attach(5, 500, 2400);    // 500-2400 µs pulse range
   sJoints[1].servo.write(90);           // Move to home position
 
-  // ── Servo [2]: joint_05_06  (GPIO 12)
-  sJoints[2].name        = "joint_05_06";
-  sJoints[2].pin         = 12;
+  // ── Servo [2]: j3  (GPIO 6)
+  sJoints[2].name        = "j3";
+  sJoints[2].pin         = 6;
   sJoints[2].current_deg = 0.0f;
   sJoints[2].target_deg  = 0.0f;
   sJoints[2].speed_pct   = 50.0f;
-  sJoints[2].min_limit   = -180.0f;
-  sJoints[2].max_limit   = 180.0f;
+  sJoints[2].min_limit   = -90.0f;
+  sJoints[2].max_limit   = 90.0f;
   sJoints[2].servo.setPeriodHertz(50);          // Standard 50 Hz PWM
-  sJoints[2].servo.attach(12, 500, 2400);    // 500-2400 µs pulse range
+  sJoints[2].servo.attach(6, 500, 2400);    // 500-2400 µs pulse range
   sJoints[2].servo.write(90);           // Move to home position
 
-  // ── Servo [3]: joint_06_07  (GPIO 13)
-  sJoints[3].name        = "joint_06_07";
-  sJoints[3].pin         = 13;
+  // ── Servo [3]: j4  (GPIO 7)
+  sJoints[3].name        = "j4";
+  sJoints[3].pin         = 7;
   sJoints[3].current_deg = 0.0f;
   sJoints[3].target_deg  = 0.0f;
   sJoints[3].speed_pct   = 50.0f;
-  sJoints[3].min_limit   = 0.0f;
-  sJoints[3].max_limit   = 45.0f;
+  sJoints[3].min_limit   = -180.0f;
+  sJoints[3].max_limit   = 180.0f;
   sJoints[3].servo.setPeriodHertz(50);          // Standard 50 Hz PWM
-  sJoints[3].servo.attach(13, 500, 2400);    // 500-2400 µs pulse range
+  sJoints[3].servo.attach(7, 500, 2400);    // 500-2400 µs pulse range
   sJoints[3].servo.write(90);           // Move to home position
 
-  // ── Stepper [0]: joint_02_03  (STEP=5, DIR=6, EN=7)
-  stJoints[0].stepper    = _rawSteppers[0];
-  stJoints[0].name       = "joint_02_03";
-  stJoints[0].target_deg = 0.0f;
-  stJoints[0].speed_pct  = 50.0f;
-  stJoints[0].step_pin   = 5;
-  stJoints[0].dir_pin    = 6;
-  stJoints[0].en_pin     = 7;
-  stJoints[0].min_limit  = -90.0f;
-  stJoints[0].max_limit  = 90.0f;
-  pinMode(7, OUTPUT);
-  digitalWrite(7, LOW);                         // Enable driver (active LOW)
-  stJoints[0].stepper.setMaxSpeed(MAX_SPEED_SPS);
-  stJoints[0].stepper.setAcceleration(ACCEL_SPS2);
-  stJoints[0].stepper.setCurrentPosition(0);        // Home = 0 steps
+  // ── Servo [4]: j5  (GPIO 8)
+  sJoints[4].name        = "j5";
+  sJoints[4].pin         = 8;
+  sJoints[4].current_deg = 0.0f;
+  sJoints[4].target_deg  = 0.0f;
+  sJoints[4].speed_pct   = 50.0f;
+  sJoints[4].min_limit   = -180.0f;
+  sJoints[4].max_limit   = 180.0f;
+  sJoints[4].servo.setPeriodHertz(50);          // Standard 50 Hz PWM
+  sJoints[4].servo.attach(8, 500, 2400);    // 500-2400 µs pulse range
+  sJoints[4].servo.write(90);           // Move to home position
 
-  // ── Stepper [1]: joint_03_04  (STEP=8, DIR=9, EN=10)
-  stJoints[1].stepper    = _rawSteppers[1];
-  stJoints[1].name       = "joint_03_04";
-  stJoints[1].target_deg = 0.0f;
-  stJoints[1].speed_pct  = 50.0f;
-  stJoints[1].step_pin   = 8;
-  stJoints[1].dir_pin    = 9;
-  stJoints[1].en_pin     = 10;
-  stJoints[1].min_limit  = -90.0f;
-  stJoints[1].max_limit  = 90.0f;
-  pinMode(10, OUTPUT);
-  digitalWrite(10, LOW);                         // Enable driver (active LOW)
-  stJoints[1].stepper.setMaxSpeed(MAX_SPEED_SPS);
-  stJoints[1].stepper.setAcceleration(ACCEL_SPS2);
-  stJoints[1].stepper.setCurrentPosition(0);        // Home = 0 steps
+  // ── Servo [5]: j6  (GPIO 9)
+  sJoints[5].name        = "j6";
+  sJoints[5].pin         = 9;
+  sJoints[5].current_deg = 0.0f;
+  sJoints[5].target_deg  = 0.0f;
+  sJoints[5].speed_pct   = 50.0f;
+  sJoints[5].min_limit   = 0.0f;
+  sJoints[5].max_limit   = 45.0f;
+  sJoints[5].servo.setPeriodHertz(50);          // Standard 50 Hz PWM
+  sJoints[5].servo.attach(9, 500, 2400);    // 500-2400 µs pulse range
+  sJoints[5].servo.write(90);           // Move to home position
 
   Serial.println("--- HARDWARE ONLINE --- Starting handshake...");
   performHandshake();
+  Serial.println("READY");
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -183,34 +154,43 @@ void performHandshake() {
     sJoints[i].servo.write(90); // return to home
   }
   delay(300);
-  // Stepper joints: nudge 3° forward and back to confirm wiring
-  long nudge = (long)(3.0f * STEPS_PER_DEG);
-  for (int i = 0; i < NUM_STEPPER_JOINTS; i++) {
-    stJoints[i].stepper.moveTo(nudge);
-    for (int k = 0; k < 50; k++) { stJoints[i].stepper.run(); delay(8); }
-    stJoints[i].stepper.moveTo(0);
-    for (int k = 0; k < 50; k++) { stJoints[i].stepper.run(); delay(8); }
-  }
   Serial.println("HANDSHAKE OK — Robot ready.");
 }
 
 // ═══════════════════════════════════════════════════════════════
 void loop() {
   updateSerial();
-  updateServos();
-  updateSteppers();   // Must run every loop — non-blocking
-  delay(8);             // ~125 Hz control loop
+
+  unsigned long now = millis();
+  if ((now - lastControlTick) >= CONTROL_PERIOD_MS) {
+    lastControlTick = now;
+    updateServos();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
 void updateSerial() {
   while (Serial.available() > 0) {
-    String cmd = Serial.readStringUntil('\n');
-    cmd.trim();
-    if (cmd.length() == 0) continue;
-    if (cmd == "?")    { Serial.println("PONG"); continue; }
-    if (cmd == "HOME") { goHome(); continue; }
-    parseCommand(cmd);
+    char c = (char)Serial.read();
+    if (c == '\r') continue;
+    if (c == '\n') {
+      serialLine[serialLinePos] = '\0';
+      String cmd = String(serialLine);
+      cmd.trim();
+      serialLinePos = 0;
+      if (cmd.length() == 0) continue;
+      if (cmd == "?" || cmd == "PING") { Serial.println("PONG"); continue; }
+      if (cmd == "HOME") { goHome(); continue; }
+      parseCommand(cmd);
+      continue;
+    }
+
+    if (serialLinePos < (SERIAL_LINE_BUF - 1)) {
+      serialLine[serialLinePos++] = c;
+    } else {
+      serialLinePos = 0;
+      Serial.println("ERR: RX overflow");
+    }
   }
 }
 
@@ -235,27 +215,9 @@ void parseCommand(const String& cmd) {
       angle = constrain(angle, sJoints[i].min_limit, sJoints[i].max_limit);
       sJoints[i].target_deg = angle;
       sJoints[i].speed_pct  = constrain(spd, 0.0f, 100.0f);
-      Serial.print("ACK[SERVO] "); Serial.print(sJoints[i].name);
-      Serial.print(" -> "); Serial.print(angle); Serial.println(" deg");
-      return;
-    }
-  }
-
-  // Search stepper joints
-  for (int i = 0; i < NUM_STEPPER_JOINTS; i++) {
-    if (name.equalsIgnoreCase(stJoints[i].name)) {
-      angle = constrain(angle, stJoints[i].min_limit, stJoints[i].max_limit);
-      stJoints[i].target_deg = angle;
-      stJoints[i].speed_pct  = constrain(spd, 0.0f, 100.0f);
-      long   steps   = (long)(angle * STEPS_PER_DEG);
-      float  sps     = (stJoints[i].speed_pct / 100.0f) * MAX_SPEED_SPS;
-      if (sps < 50.0f) sps = 50.0f;  // minimum speed guard
-      stJoints[i].stepper.setMaxSpeed(sps);
-      stJoints[i].stepper.moveTo(steps);
-      Serial.print("ACK[STEP] "); Serial.print(stJoints[i].name);
-      Serial.print(" -> "); Serial.print(angle);
-      Serial.print(" deg | "); Serial.print(steps);
-      Serial.println(" steps");
+      Serial.print("ACK:"); Serial.print(sJoints[i].name);
+      Serial.print(":SERVO:"); Serial.print(angle, 2);
+      Serial.print(":"); Serial.println(sJoints[i].speed_pct, 2);
       return;
     }
   }
@@ -268,13 +230,6 @@ void parseCommand(const String& cmd) {
 void goHome() {
   for (int i = 0; i < NUM_SERVO_JOINTS; i++) {
     sJoints[i].target_deg = 0.0f;
-  }
-  for (int i = 0; i < NUM_STEPPER_JOINTS; i++) {
-    stJoints[i].target_deg = 0.0f;
-    float home_sps = (stJoints[i].speed_pct / 100.0f) * MAX_SPEED_SPS;
-    if (home_sps < 50.0f) home_sps = 50.0f;
-    stJoints[i].stepper.setMaxSpeed(home_sps);
-    stJoints[i].stepper.moveTo(0);
   }
   Serial.println("HOME: All joints returning to 0 deg.");
 }
@@ -290,8 +245,8 @@ void updateServos() {
     if (fabsf(err) < 0.1f) {
       sJoints[i].current_deg = tgt;        // snap to target
     } else {
-      // Speed_pct ∈ [0,100] → step ∈ [0.08, 8] deg per tick
-      float step = (sJoints[i].speed_pct / 100.0f) * 8.0f;
+      // Speed_pct ∈ [0,100] → step ∈ [0.05, 4.5] deg per control tick
+      float step = (sJoints[i].speed_pct / 100.0f) * 4.5f;
       if (step < 0.08f) step = 0.08f;
       sJoints[i].current_deg += (err > 0) ? step : -step;
       // Overshoot guard
@@ -303,13 +258,5 @@ void updateServos() {
     //   robot 0° → servo 90° (midpoint)
     int sv = (int)constrain(sJoints[i].current_deg + 90.0f, 0.0f, 180.0f);
     sJoints[i].servo.write(sv);
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Non-blocking AccelStepper tick — MUST be called every loop iter
-void updateSteppers() {
-  for (int i = 0; i < NUM_STEPPER_JOINTS; i++) {
-    stJoints[i].stepper.run();
   }
 }
