@@ -518,6 +518,84 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
             self.gripper_surface_btn.clicked.connect(self.joint_tab.on_select_gripper_surface)
             self.gripper_surface_btn.setVisible(False)  # Only visible in Joint Mode
 
+            # --- Home Position XYZ Input (bottom-right of canvas, above Home btn) ---
+            self.home_xyz_widget = QtWidgets.QWidget(self.canvas)
+            self.home_xyz_widget.setFixedSize(200, 40)
+            self.home_xyz_widget.setStyleSheet("""
+                QWidget {
+                    background-color: rgba(255, 255, 255, 220);
+                    border: 2px solid #1565c0;
+                    border-radius: 8px;
+                }
+            """)
+            xyz_layout = QtWidgets.QHBoxLayout(self.home_xyz_widget)
+            xyz_layout.setContentsMargins(6, 4, 6, 4)
+            xyz_layout.setSpacing(4)
+
+            spin_style = """
+                QDoubleSpinBox {
+                    background: white;
+                    color: #212121;
+                    border: 1px solid #bbb;
+                    border-radius: 3px;
+                    padding: 2px;
+                    font-size: 11px;
+                    font-weight: bold;
+                }
+            """
+
+            self.home_x_spin = QtWidgets.QDoubleSpinBox()
+            self.home_x_spin.setRange(-9999, 9999)
+            self.home_x_spin.setValue(0)
+            self.home_x_spin.setPrefix("X:")
+            self.home_x_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+            self.home_x_spin.setFixedWidth(58)
+            self.home_x_spin.setStyleSheet(spin_style)
+            xyz_layout.addWidget(self.home_x_spin)
+
+            self.home_y_spin = QtWidgets.QDoubleSpinBox()
+            self.home_y_spin.setRange(-9999, 9999)
+            self.home_y_spin.setValue(0)
+            self.home_y_spin.setPrefix("Y:")
+            self.home_y_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+            self.home_y_spin.setFixedWidth(58)
+            self.home_y_spin.setStyleSheet(spin_style)
+            xyz_layout.addWidget(self.home_y_spin)
+
+            self.home_z_spin = QtWidgets.QDoubleSpinBox()
+            self.home_z_spin.setRange(-9999, 9999)
+            self.home_z_spin.setValue(0)
+            self.home_z_spin.setPrefix("Z:")
+            self.home_z_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+            self.home_z_spin.setFixedWidth(58)
+            self.home_z_spin.setStyleSheet(spin_style)
+            xyz_layout.addWidget(self.home_z_spin)
+
+            # --- Global Home Position Button (bottom-right of canvas) ---
+            self.home_btn = QtWidgets.QPushButton("🏠 Home", self.canvas)
+            self.home_btn.setToolTip("Move robot to Home position")
+            self.home_btn.setFixedSize(100, 40)
+            self.home_btn.setCursor(QtCore.Qt.PointingHandCursor)
+            self.home_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #1976d2;
+                    color: white;
+                    border: 2px solid #1565c0;
+                    border-radius: 8px;
+                    font-weight: bold;
+                    font-size: 13px;
+                    padding: 5px;
+                }
+                QPushButton:hover {
+                    background-color: #1565c0;
+                    border-color: #0d47a1;
+                }
+                QPushButton:pressed {
+                    background-color: #0d47a1;
+                }
+            """)
+            self.home_btn.clicked.connect(self.go_home)
+
             original_resize = self.canvas.resizeEvent
 
             def patched_resize(event):
@@ -525,6 +603,8 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
                 self.iso_btn.move(self.canvas.width() - 160, 24)
                 self.focus_btn.move(self.canvas.width() - 160, 68)
                 self.gripper_surface_btn.move(self.canvas.width() - 180, self.canvas.height() - 60)
+                self.home_xyz_widget.move(self.canvas.width() - 220, self.canvas.height() - 110)
+                self.home_btn.move(self.canvas.width() - 120, self.canvas.height() - 60)
 
             self.canvas.resizeEvent = patched_resize
 
@@ -534,6 +614,70 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
             self._left_container.setEnabled(False)
             self._set_canvas_error("Failed to initialize 3D engine.", traceback.format_exc())
 
+    # ------------------------------------------------------------------
+    # Global Home Position
+    # ------------------------------------------------------------------
+    def go_home(self):
+        """
+        Move the robot's live point to the global Home position
+        defined by the XYZ inputs on the canvas.
+        """
+        x = self.home_x_spin.value()
+        y = self.home_y_spin.value()
+        z = self.home_z_spin.value()
+        
+        ratio = self.canvas.grid_units_per_cm
+        target_world = np.array([x * ratio, y * ratio, z * ratio])
+        
+        self.log(f"[Home] Navigating live point to: X={x:.2f}, Y={y:.2f}, Z={z:.2f}")
+
+        # 1. Identify TCP (Tool Center Point) Link
+        tcp_link = None
+        if hasattr(self, 'simulation_tab') and hasattr(self.simulation_tab, '_get_tcp_link'):
+            tcp_link = self.simulation_tab._get_tcp_link()
+        
+        if not tcp_link:
+            # Fallback search for a leaf link
+            for link in self.robot.links.values():
+                if link.parent_joint and not link.child_joints:
+                    tcp_link = link
+                    break
+        
+        if not tcp_link:
+            self.log("[Home] Error: No robot arm detected (link with joint needed).")
+            return
+
+        # 2. Get local tool offset (fingertip midpoint or custom offset)
+        _, local_tool_pt, _ = self.get_link_tool_point(tcp_link)
+        
+        # 3. Solve Inverse Kinematics
+        success = self.robot.inverse_kinematics(
+            target_pos=target_world,
+            tcp_link=tcp_link,
+            tool_offset=local_tool_pt,
+            tolerance=0.1
+        )
+
+        if success:
+            self.log(f"[Home] Successfully moved to Home position.")
+            # 4. Global UI Refresh
+            self.canvas.plotter.render()
+            if hasattr(self, 'joint_tab'):
+                self.joint_tab.refresh_joints()
+            if hasattr(self, 'simulation_tab'):
+                self.simulation_tab.refresh_joints()
+            self.update_live_ui()  # Syncs the "LP" row
+                
+            # Sync to the hidden simulation panel home coords
+            if hasattr(self, 'home_x'):
+                self.home_x.setValue(x)
+                self.home_y.setValue(y)
+                self.home_z.setValue(z)
+        else:
+            self.log(f"[Home] Warning: Could not reach Home position (Out of workspace).")
+            self.show_toast("Home Position Unreachable", "warning")
+
+        self.home_position = (x, y, z)
 
 
 if __name__ == "__main__":

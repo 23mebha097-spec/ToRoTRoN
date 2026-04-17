@@ -236,7 +236,7 @@ class Robot:
             curr = curr.parent_joint.parent_link
         return list(reversed(chain))
 
-    def inverse_kinematics(self, target_pos, tcp_link, max_iters=300, tolerance=0.3, tool_offset=None):
+    def inverse_kinematics(self, target_pos, tcp_link, max_iters=300, tolerance=0.3, tool_offset=None, target_orient_axis=None, local_orient_axis=None, orient_weight=0.5):
         """
         Robust multi-pass Cyclic Coordinate Descent (CCD) IK solver.
 
@@ -246,9 +246,15 @@ class Robot:
         3. Multi-restart: If stuck in a local minimum, perturb joints and retry.
         4. Progressive tolerance: Tries to converge tightly.
         5. Joint-limit enforcement: Clamps all joints throughout.
+        6. Optional 5-DOF Orientation constraint integration.
         """
         target = np.array(target_pos, dtype=float)
         t_off = np.array(tool_offset, dtype=float) if tool_offset is not None else np.zeros(3)
+        if target_orient_axis is not None and local_orient_axis is not None:
+            target_orient_axis = np.array(target_orient_axis, dtype=float)
+            target_orient_axis /= (np.linalg.norm(target_orient_axis) + 1e-9)
+            local_orient_axis = np.array(local_orient_axis, dtype=float)
+            local_orient_axis /= (np.linalg.norm(local_orient_axis) + 1e-9)
 
         # --- Build kinematic chain (root->TCP, skip slave joints) ---
         chain = []
@@ -310,6 +316,29 @@ class Robot:
                 cos_a = np.clip(np.dot(u1, u2), -1.0, 1.0)
                 sin_a = np.dot(axis_w, np.cross(u1, u2))
                 delta_deg = np.degrees(np.arctan2(sin_a, cos_a))
+
+                # --- 5-DOF Orientation Blending ---
+                if target_orient_axis is not None and local_orient_axis is not None:
+                    # Tool vector in current world space
+                    curr_vec = (tcp_link.t_world[:3, :3] @ local_orient_axis)
+                    curr_vec /= (np.linalg.norm(curr_vec) + 1e-9)
+                    
+                    vc_proj = curr_vec - np.dot(curr_vec, axis_w) * axis_w
+                    vto_proj = target_orient_axis - np.dot(target_orient_axis, axis_w) * axis_w
+                    
+                    nc_o, nt_o = np.linalg.norm(vc_proj), np.linalg.norm(vto_proj)
+                    if nc_o > 1e-4 and nt_o > 1e-4:
+                        u1_o = vc_proj / nc_o
+                        u2_o = vto_proj / nt_o
+                        cos_o = np.clip(np.dot(u1_o, u2_o), -1.0, 1.0)
+                        sin_o = np.dot(axis_w, np.cross(u1_o, u2_o))
+                        delta_orient = np.degrees(np.arctan2(sin_o, cos_o))
+                        
+                        # Blend the desired changes (pull towards position, while turning to orientation)
+                        dist = np.linalg.norm(target - tcp_w)
+                        # More weight to orientation as it gets closer
+                        dynamic_weight = np.clip(orient_weight * (1.0 + (10.0 / (dist + 1.0))), 0.0, 0.9)
+                        delta_deg = delta_deg * (1.0 - dynamic_weight) + delta_orient * dynamic_weight
 
                 # Adaptive damping:
                 # - Close to target  → small cautious step (max 5°)

@@ -418,9 +418,6 @@ class NavigationMixin:
             self.live_y.blockSignals(False)
             self.live_z.blockSignals(False)
 
-            if hasattr(self.canvas, "set_live_point_marker"):
-                self.canvas.set_live_point_marker(pos)
-
             self._record_live_point_path(pos)
 
             # 2. Pick-and-Place Simulation Logic (MAGNET MODE)
@@ -457,9 +454,6 @@ class NavigationMixin:
 
         if hasattr(self, "canvas") and hasattr(self.canvas, "record_live_point_path"):
             self.canvas.record_live_point_path(home_pos)
-        if hasattr(self, "canvas") and hasattr(self.canvas, "set_live_point_marker"):
-            self.canvas.set_live_point_marker(home_pos)
-
     def _record_live_point_path(self, pos=None):
         """Records the current TCP position when the live-point path overlay is enabled."""
         if not hasattr(self, "canvas") or not hasattr(self.canvas, "record_live_point_path"):
@@ -492,9 +486,6 @@ class NavigationMixin:
             pos, _, _ = self.get_link_tool_point(tcp_link)
 
         self.canvas.record_live_point_path(pos)
-        if hasattr(self.canvas, "set_live_point_marker"):
-            self.canvas.set_live_point_marker(pos)
-
     def _get_joint_surface_world(self, joint, prefer_gripping=True):
         """Resolve a saved joint surface into world-space coordinates."""
         if not joint:

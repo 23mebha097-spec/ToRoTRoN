@@ -12,12 +12,12 @@
  *                speed_pct  — float, 0-100 %
  *
  *  Joints (6 independent):
- *    j1  SERVO     PWM=4
- *    j4  SERVO     PWM=11
- *    j5  SERVO     PWM=12
- *    j6  SERVO     PWM=13
- *    j2  STEPPER   STEP=5, DIR=6, EN=7
- *    j3  STEPPER   STEP=8, DIR=9, EN=10
+ *    joint_01_02  SERVO     PWM=4
+ *    joint_04_05  SERVO     PWM=11
+ *    joint_05_06  SERVO     PWM=12
+ *    joint_06_07  SERVO     PWM=13
+ *    joint_02_03  STEPPER   STEP=5, DIR=6, EN=7
+ *    joint_03_04  STEPPER   STEP=8, DIR=9, EN=10
  *
  *  Stepper config : 200 steps/rev × ×16 micro-step
  *                   8.8889 steps/degree
@@ -69,8 +69,8 @@ struct StepperJoint {
 
 // AccelStepper cannot be aggregate-initialised; initialise in setup()
 AccelStepper _rawSteppers[NUM_STEPPER_JOINTS] = {
-  AccelStepper(AccelStepper::DRIVER, 5, 6),  // j2
-  AccelStepper(AccelStepper::DRIVER, 8, 9)  // j3
+  AccelStepper(AccelStepper::DRIVER, 5, 6),  // joint_02_03
+  AccelStepper(AccelStepper::DRIVER, 8, 9)  // joint_03_04
 };
 StepperJoint stJoints[NUM_STEPPER_JOINTS];
 
@@ -86,8 +86,8 @@ void setup() {
   ESP32PWM::allocateTimer(2);
   ESP32PWM::allocateTimer(3);
 
-  // ── Servo [0]: j1  (GPIO 4)
-  sJoints[0].name        = "j1";
+  // ── Servo [0]: joint_01_02  (GPIO 4)
+  sJoints[0].name        = "joint_01_02";
   sJoints[0].pin         = 4;
   sJoints[0].current_deg = 0.0f;
   sJoints[0].target_deg  = 0.0f;
@@ -98,20 +98,20 @@ void setup() {
   sJoints[0].servo.attach(4, 500, 2400);    // 500-2400 µs pulse range
   sJoints[0].servo.write(90);           // Move to home position
 
-  // ── Servo [1]: j4  (GPIO 11)
-  sJoints[1].name        = "j4";
+  // ── Servo [1]: joint_04_05  (GPIO 11)
+  sJoints[1].name        = "joint_04_05";
   sJoints[1].pin         = 11;
   sJoints[1].current_deg = 0.0f;
   sJoints[1].target_deg  = 0.0f;
   sJoints[1].speed_pct   = 50.0f;
-  sJoints[1].min_limit   = -180.0f;
-  sJoints[1].max_limit   = 180.0f;
+  sJoints[1].min_limit   = -90.0f;
+  sJoints[1].max_limit   = 90.0f;
   sJoints[1].servo.setPeriodHertz(50);          // Standard 50 Hz PWM
   sJoints[1].servo.attach(11, 500, 2400);    // 500-2400 µs pulse range
   sJoints[1].servo.write(90);           // Move to home position
 
-  // ── Servo [2]: j5  (GPIO 12)
-  sJoints[2].name        = "j5";
+  // ── Servo [2]: joint_05_06  (GPIO 12)
+  sJoints[2].name        = "joint_05_06";
   sJoints[2].pin         = 12;
   sJoints[2].current_deg = 0.0f;
   sJoints[2].target_deg  = 0.0f;
@@ -122,8 +122,8 @@ void setup() {
   sJoints[2].servo.attach(12, 500, 2400);    // 500-2400 µs pulse range
   sJoints[2].servo.write(90);           // Move to home position
 
-  // ── Servo [3]: j6  (GPIO 13)
-  sJoints[3].name        = "j6";
+  // ── Servo [3]: joint_06_07  (GPIO 13)
+  sJoints[3].name        = "joint_06_07";
   sJoints[3].pin         = 13;
   sJoints[3].current_deg = 0.0f;
   sJoints[3].target_deg  = 0.0f;
@@ -134,9 +134,9 @@ void setup() {
   sJoints[3].servo.attach(13, 500, 2400);    // 500-2400 µs pulse range
   sJoints[3].servo.write(90);           // Move to home position
 
-  // ── Stepper [0]: j2  (STEP=5, DIR=6, EN=7)
+  // ── Stepper [0]: joint_02_03  (STEP=5, DIR=6, EN=7)
   stJoints[0].stepper    = _rawSteppers[0];
-  stJoints[0].name       = "j2";
+  stJoints[0].name       = "joint_02_03";
   stJoints[0].target_deg = 0.0f;
   stJoints[0].speed_pct  = 50.0f;
   stJoints[0].step_pin   = 5;
@@ -150,9 +150,9 @@ void setup() {
   stJoints[0].stepper.setAcceleration(ACCEL_SPS2);
   stJoints[0].stepper.setCurrentPosition(0);        // Home = 0 steps
 
-  // ── Stepper [1]: j3  (STEP=8, DIR=9, EN=10)
+  // ── Stepper [1]: joint_03_04  (STEP=8, DIR=9, EN=10)
   stJoints[1].stepper    = _rawSteppers[1];
-  stJoints[1].name       = "j3";
+  stJoints[1].name       = "joint_03_04";
   stJoints[1].target_deg = 0.0f;
   stJoints[1].speed_pct  = 50.0f;
   stJoints[1].step_pin   = 8;

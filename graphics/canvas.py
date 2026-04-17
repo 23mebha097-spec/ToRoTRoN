@@ -639,62 +639,6 @@ class RobotCanvas(QtWidgets.QWidget):
         except:
             pass
 
-    def set_live_point_marker(self, point, color="#1976d2", name=None, radius=None, opacity=1.0, render=True):
-        """Show a small 3D marker at a world point (used for TCP/live path feedback)."""
-        pt = np.array(point, dtype=float).reshape(-1)
-        if pt.size < 3:
-            return
-        pt = pt[:3]
-
-        actor_name = name or self._live_point_actor_name
-        if radius is None:
-            radius = max(1.0, float(self.grid_units_per_cm) * 0.25)  # ~2.5mm when 10 units = 1cm
-
-        try:
-            actor = self.plotter.actors.get(actor_name)
-        except Exception:
-            actor = None
-
-        if actor is None:
-            try:
-                self.plotter.remove_actor(actor_name)
-            except Exception:
-                pass
-            # Create sphere directly at target position
-            sphere = pv.Sphere(radius=float(radius), center=tuple(pt), theta_resolution=24, phi_resolution=24)
-            actor = self.plotter.add_mesh(
-                sphere,
-                color=color,
-                name=actor_name,
-                pickable=False,
-                opacity=float(opacity),
-            )
-        else:
-            # Update existing actor position using user_matrix (PyVista-correct way)
-            try:
-                mat = actor.user_matrix
-                mat[0, 3] = float(pt[0])
-                mat[1, 3] = float(pt[1])
-                mat[2, 3] = float(pt[2])
-                actor.user_matrix = mat
-            except Exception:
-                # Fallback: recreate the marker if the actor handle is stale.
-                try:
-                    self.plotter.remove_actor(actor_name)
-                except Exception:
-                    pass
-                sphere = pv.Sphere(radius=float(radius), center=tuple(pt), theta_resolution=24, phi_resolution=24)
-                self.plotter.add_mesh(
-                    sphere,
-                    color=color,
-                    name=actor_name,
-                    pickable=False,
-                    opacity=float(opacity),
-                )
-
-        if render:
-            self.plotter.render()
-
     def clear_live_point_marker(self, name=None):
         """Remove the live point marker from the 3D graph."""
         actor_name = name or self._live_point_actor_name

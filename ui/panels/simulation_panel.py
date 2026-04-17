@@ -1,4 +1,4 @@
-﻿from PyQt5 import QtWidgets, QtCore, QtGui
+from PyQt5 import QtWidgets, QtCore, QtGui
 import json
 import numpy as np
 import traceback
@@ -310,10 +310,11 @@ class SimulationPanel(QtWidgets.QWidget):
         self.home_y = self.create_coord_sb("#455A64", save_on_change=False)
         self.home_z = self.create_coord_sb("#455A64", save_on_change=False)
 
-        points_grid.addWidget(home_lbl, 2, 0)
-        points_grid.addWidget(self.home_x, 2, 1)
-        points_grid.addWidget(self.home_y, 2, 2)
-        points_grid.addWidget(self.home_z, 2, 3)
+        # HOME row hidden from UI but kept for internal use
+        home_lbl.setVisible(False)
+        self.home_x.setVisible(False)
+        self.home_y.setVisible(False)
+        self.home_z.setVisible(False)
 
         # LP Row
         lp_lbl = QtWidgets.QLabel("LP")
@@ -1604,13 +1605,6 @@ class SimulationPanel(QtWidgets.QWidget):
             pt_cm = self.weld_live_point_world / ratio
             self.weld_live_point_label.setText(
                 f"Weld live point: ({pt_cm[0]:.2f}, {pt_cm[1]:.2f}, {pt_cm[2]:.2f}) cm"
-            )
-
-        if hasattr(self.main_window.canvas, "set_live_point_marker"):
-            self.main_window.canvas.set_live_point_marker(
-                self.weld_live_point_world,
-                color="#ff9800",
-                name="weld_selected_live_point",
             )
 
         self.main_window.log(
@@ -3456,6 +3450,7 @@ class SimulationPanel(QtWidgets.QWidget):
             try:
                 inv = np.linalg.inv(link.t_world)
                 self.paint_nozzle_tcp_offset = (inv @ np.append(np.array(center, dtype=float), 1.0))[:3]
+                self.paint_nozzle_pick_data["local_normal"] = inv[:3, :3] @ np.array(normal, dtype=float)
             except Exception:
                 self.paint_nozzle_tcp_offset = None
 
@@ -3663,6 +3658,8 @@ class SimulationPanel(QtWidgets.QWidget):
 
     def _clear_paint_area_preview(self):
         """Remove the manual area preview from the scene."""
+        if not hasattr(self, 'main_window') or not hasattr(self.main_window, 'canvas'):
+            return
         canvas = self.main_window.canvas
         for actor_name in [
             "robot_paint_square",
@@ -3702,6 +3699,18 @@ class SimulationPanel(QtWidgets.QWidget):
         self.main_window.log("Painting preview started.")
         self.main_window.show_toast("Painting started", "success")
         self.paint_timer.start(50)
+
+    def _stop_painting_silent(self):
+        """Stop painting state and timers without logging or toast (safe during init)."""
+        self.painting_active = False
+        try:
+            self.paint_timer.stop()
+        except Exception:
+            pass
+        self.paint_motion_state = "IDLE"
+        self.paint_current_point_idx = 0
+        self.paint_target_joint_values = {}
+        self.paint_joint_chain = []
 
     def stop_painting(self):
         """Stop painting preview mode and clear the preview from the 3D scene."""
@@ -3792,13 +3801,18 @@ class SimulationPanel(QtWidgets.QWidget):
 
     def _clear_paint_square_preview(self):
         """Remove the paint square preview from the scene."""
+        if not hasattr(self, 'main_window') or not hasattr(self.main_window, 'canvas'):
+            return
         canvas = self.main_window.canvas
         try:
             canvas.plotter.remove_actor("robot_paint_square")
             canvas.plotter.remove_actor("robot_paint_square_raster")
         except Exception:
             pass
-        canvas.plotter.render()
+        try:
+            canvas.plotter.render()
+        except Exception:
+            pass
 
     def _safe_on_paint_tick(self):
         """Advance the painting motion while keeping runtime errors contained."""
@@ -3851,13 +3865,34 @@ class SimulationPanel(QtWidgets.QWidget):
                 tool_local = np.array(self.paint_nozzle_tcp_offset, dtype=float)
             else:
                 _, tool_local, _ = self.main_window.get_link_tool_point(tcp_link, return_vec=True)
+
+            # --- Enforce 45-degree nozzle orientation ---
+            target_orient_axis = None
+            local_orient_axis = None
+            if hasattr(self, "paint_square_state") and self.paint_square_state:
+                plane_n = np.array(self.paint_square_state["work_plane_normal_world"], dtype=float)
+                plane_y = np.array(self.paint_square_state["work_plane_y_world"], dtype=float)
+                
+                # 45-degree inclination: point into the surface (-plane_n) and tilt along plane_y
+                angle = np.radians(45.0)
+                # target_orient points *from* the tool *to* the workpiece
+                target_orient_axis = -plane_n * np.cos(angle) + plane_y * np.sin(angle)
+                
+                if getattr(self, "paint_nozzle_pick_data", None) and "local_normal" in self.paint_nozzle_pick_data:
+                    local_orient_axis = np.array(self.paint_nozzle_pick_data["local_normal"], dtype=float)
+                else:
+                    local_orient_axis = np.array([0.0, 0.0, 1.0])
+
             start_vals = {n: j.current_value for n, j in self.main_window.robot.joints.items()}
             reached = self.main_window.robot.inverse_kinematics(
                 target_world,
                 tcp_link,
-                max_iters=300,
+                max_iters=400,
                 tolerance=0.5 * ratio,
                 tool_offset=tool_local,
+                target_orient_axis=target_orient_axis,
+                local_orient_axis=local_orient_axis,
+                orient_weight=0.6,
             )
             self.paint_target_joint_values = {
                 n: j.current_value for n, j in self.main_window.robot.joints.items()
@@ -4489,8 +4524,51 @@ class SimulationPanel(QtWidgets.QWidget):
         return btn
 
     def switch_view(self, index):
+        # Only run cleanup when the main window is fully ready (canvas + console exist)
+        mw = getattr(self, 'main_window', None)
+        _ready = (
+            mw is not None
+            and hasattr(mw, 'canvas')
+            and hasattr(mw, 'console')
+        )
+
+        if _ready:
+            # Stop painting and clear its 3D overlays
+            if getattr(self, 'painting_active', False):
+                try:
+                    self._stop_painting_silent()
+                except Exception:
+                    pass
+            try:
+                self._clear_paint_area_preview()
+                self._clear_paint_square_preview()
+                self._clear_paint_live_trail()
+            except Exception:
+                pass
+
+            # Stop welding
+            if getattr(self, 'is_welding_active', False):
+                try:
+                    self.stop_welding()
+                except Exception:
+                    pass
+
+            # Stop pick-and-place sim
+            if hasattr(self, 'start_btn') and self.start_btn.isChecked():
+                self.start_btn.setChecked(False)
+                try:
+                    self.toggle_pick_place_sim(False)
+                except Exception:
+                    pass
+
+            # Return robot to home position
+            if hasattr(mw, 'go_home') and mw.robot.joints:
+                try:
+                    mw.go_home()
+                except Exception:
+                    pass
+
         self.stack.setCurrentIndex(index)
-        
         # Style active button
         active_style = """
             QPushButton {
