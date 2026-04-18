@@ -7,6 +7,7 @@ from ui.panels.program_panel import ProgramPanel
 from ui.panels.gripper_panel import GripperPanel
 from ui.panels.simulation_panel import SimulationPanel
 from core.serial_manager import SerialManager
+from ui.panels.loop_panel import LoopPanel
 import os
 import numpy as np
 import random
@@ -184,7 +185,8 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
             ("Joint", "Create and control joints"),
             ("Matrices", "View transformation matrices"),
             ("Code", "Program robot movements"),
-            ("Gripper", "Control and calibrate robotic grippers")
+            ("Gripper", "Control and calibrate robotic grippers"),
+            ("Loop", "Record and loop joint movements")
         ]
         
         # Ensure panel_stack is initialized before buttons are connected
@@ -200,6 +202,7 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         self.matrices_tab = MatricesPanel(self)
         self.program_tab = ProgramPanel(self)
         self.gripper_tab = GripperPanel(self)
+        self.loop_tab = LoopPanel(self)
         self.simulation_tab = SimulationPanel(self)
         
         self.panel_stack.addWidget(self.links_tab)
@@ -208,6 +211,7 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         self.panel_stack.addWidget(self.matrices_tab)
         self.panel_stack.addWidget(self.program_tab)
         self.panel_stack.addWidget(self.gripper_tab)
+        self.panel_stack.addWidget(self.loop_tab)
         self.panel_stack.addWidget(self.simulation_tab)
         
         for name, tooltip in nav_items:
@@ -599,12 +603,29 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
             original_resize = self.canvas.resizeEvent
 
             def patched_resize(event):
-                original_resize(event)
-                self.iso_btn.move(self.canvas.width() - 160, 24)
-                self.focus_btn.move(self.canvas.width() - 160, 68)
-                self.gripper_surface_btn.move(self.canvas.width() - 180, self.canvas.height() - 60)
-                self.home_xyz_widget.move(self.canvas.width() - 220, self.canvas.height() - 110)
-                self.home_btn.move(self.canvas.width() - 120, self.canvas.height() - 60)
+                # Call original resize first
+                if original_resize:
+                    original_resize(event)
+                
+                # SAFETY: Ensure buttons exist and are initialized
+                if not hasattr(self, 'canvas') or self.canvas is None:
+                    return
+                
+                # Check each button before moving it to avoid AttributeErrors during bootstrap
+                if hasattr(self, 'iso_btn') and self.iso_btn:
+                    self.iso_btn.move(self.canvas.width() - 160, 24)
+                
+                if hasattr(self, 'focus_btn') and self.focus_btn:
+                    self.focus_btn.move(self.canvas.width() - 160, 68)
+                
+                if hasattr(self, 'gripper_surface_btn') and self.gripper_surface_btn:
+                    self.gripper_surface_btn.move(self.canvas.width() - 180, self.canvas.height() - 60)
+                
+                if hasattr(self, 'home_xyz_widget') and self.home_xyz_widget:
+                    self.home_xyz_widget.move(self.canvas.width() - 220, self.canvas.height() - 110)
+                
+                if hasattr(self, 'home_btn') and self.home_btn:
+                    self.home_btn.move(self.canvas.width() - 120, self.canvas.height() - 60)
 
             self.canvas.resizeEvent = patched_resize
 
@@ -622,60 +643,82 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         Move the robot's live point to the global Home position
         defined by the XYZ inputs on the canvas.
         """
-        x = self.home_x_spin.value()
-        y = self.home_y_spin.value()
-        z = self.home_z_spin.value()
-        
-        ratio = self.canvas.grid_units_per_cm
-        target_world = np.array([x * ratio, y * ratio, z * ratio])
-        
-        self.log(f"[Home] Navigating live point to: X={x:.2f}, Y={y:.2f}, Z={z:.2f}")
+        try:
+            x = self.home_x_spin.value()
+            y = self.home_y_spin.value()
+            z = self.home_z_spin.value()
+            
+            ratio = self.canvas.grid_units_per_cm
+            target_world = np.array([x * ratio, y * ratio, z * ratio])
+            
+            self.log(f"[Home] Navigating live point to: X={x:.2f}, Y={y:.2f}, Z={z:.2f}...")
 
-        # 1. Identify TCP (Tool Center Point) Link
-        tcp_link = None
-        if hasattr(self, 'simulation_tab') and hasattr(self.simulation_tab, '_get_tcp_link'):
-            tcp_link = self.simulation_tab._get_tcp_link()
-        
-        if not tcp_link:
-            # Fallback search for a leaf link
-            for link in self.robot.links.values():
-                if link.parent_joint and not link.child_joints:
-                    tcp_link = link
-                    break
-        
-        if not tcp_link:
-            self.log("[Home] Error: No robot arm detected (link with joint needed).")
-            return
+            # 1. Identify TCP (Tool Center Point) Link
+            tcp_link = None
+            if hasattr(self, 'simulation_tab') and hasattr(self.simulation_tab, '_get_tcp_link'):
+                tcp_link = self.simulation_tab._get_tcp_link()
+            
+            if not tcp_link:
+                # Fallback search for a leaf link
+                for link in self.robot.links.values():
+                    if link.parent_joint and not link.child_joints:
+                        tcp_link = link
+                        break
+            
+            if not tcp_link:
+                self.log("[Home] Error: No robot arm detected (link with joint needed).")
+                return
 
-        # 2. Get local tool offset (fingertip midpoint or custom offset)
-        _, local_tool_pt, _ = self.get_link_tool_point(tcp_link)
-        
-        # 3. Solve Inverse Kinematics
-        success = self.robot.inverse_kinematics(
-            target_pos=target_world,
-            tcp_link=tcp_link,
-            tool_offset=local_tool_pt,
-            tolerance=0.1
-        )
+            # 2. Get local tool offset (fingertip midpoint or custom offset)
+            _, local_tool_pt, _ = self.get_link_tool_point(tcp_link)
+            
+            # 3. Solve Inverse Kinematics
+            success = self.robot.inverse_kinematics(
+                target_pos=target_world,
+                tcp_link=tcp_link,
+                tool_offset=local_tool_pt,
+                tolerance=0.1
+            )
 
-        if success:
-            self.log(f"[Home] Successfully moved to Home position.")
-            # 4. Global UI Refresh
-            self.canvas.plotter.render()
-            if hasattr(self, 'joint_tab'):
-                self.joint_tab.refresh_joints()
-            if hasattr(self, 'simulation_tab'):
-                self.simulation_tab.refresh_joints()
-            self.update_live_ui()  # Syncs the "LP" row
+            if success:
+                self.log(f"✅ [Home] Successfully moved to Home position.")
+                # 4. Global UI Refresh
+                self.canvas.plotter.render()
                 
-            # Sync to the hidden simulation panel home coords
-            if hasattr(self, 'home_x'):
-                self.home_x.setValue(x)
-                self.home_y.setValue(y)
-                self.home_z.setValue(z)
-        else:
-            self.log(f"[Home] Warning: Could not reach Home position (Out of workspace).")
-            self.show_toast("Home Position Unreachable", "warning")
+                # Refresh all active tabs safely
+                tabs = [
+                    ('joint_tab', 'Joint'),
+                    ('simulation_tab', 'Simulation'),
+                    ('gripper_tab', 'Gripper')
+                ]
+                for attr, name in tabs:
+                    tab = getattr(self, attr, None)
+                    if tab and hasattr(tab, 'refresh_joints'):
+                        try:
+                            tab.refresh_joints()
+                        except Exception as e:
+                            print(f"Error refreshing {name} tab: {e}")
+
+                self.update_live_ui()  # Syncs the "LP" row
+                    
+                # Sync into Simulation Panel's hidden home coords if they exist
+                if hasattr(self, 'simulation_tab'):
+                    sim = self.simulation_tab
+                    for coord, val in [('home_x', x), ('home_y', y), ('home_z', z)]:
+                        if hasattr(sim, coord):
+                            sb = getattr(sim, coord)
+                            if hasattr(sb, 'setValue'):
+                                sb.blockSignals(True)
+                                sb.setValue(val)
+                                sb.blockSignals(False)
+            else:
+                self.log(f"⚠️ [Home] Warning: Could not reach Home position (Out of workspace).")
+                self.show_toast("Home Position Unreachable", "warning")
+
+        except Exception as e:
+            self.log(f"❌ [Home] Critical Error: {str(e)}")
+            traceback.print_exc()
+            self.show_toast("Home Command Failed", "error")
 
         self.home_position = (x, y, z)
 

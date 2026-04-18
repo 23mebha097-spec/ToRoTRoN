@@ -52,6 +52,15 @@ class Joint:
         parent_link.child_joints.append(self)
         child_link.parent_joint = self
 
+    @property
+    def current_deg(self) -> float:
+        """Alias for current_value for consistent degree-based logic."""
+        return self.current_value
+
+    @current_deg.setter
+    def current_deg(self, val: float):
+        self.current_value = float(val)
+
     def get_matrix(self):
         """
         Returns the transform matrix for this joint.

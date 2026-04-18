@@ -2467,6 +2467,11 @@ class GripperPanel(QtWidgets.QWidget):
         joint.current_value = target
         self._propagate_relation(name, target)
 
+        # Send to Hardware (Digital Twin Sync)
+        if hasattr(self.mw, 'serial_mgr') and self.mw.serial_mgr.is_connected:
+            speed = float(getattr(self.mw, 'current_speed', 50))
+            self.mw.serial_mgr.send_command(name, target, speed=speed)
+
         self.mw.robot.update_kinematics()
         self.mw.canvas.update_transforms(self.mw.robot)
         self.refresh_contact_surface_ui(name)

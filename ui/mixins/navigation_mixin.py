@@ -409,6 +409,9 @@ class NavigationMixin:
             self.live_y.blockSignals(True)
             self.live_z.blockSignals(True)
             
+            if not hasattr(self, 'canvas') or self.canvas is None:
+                return
+                
             ratio = self.canvas.grid_units_per_cm
             self.live_x.setValue(pos[0] / ratio)
             self.live_y.setValue(pos[1] / ratio)
@@ -1111,17 +1114,35 @@ class NavigationMixin:
             color='#1976d2', 
             name="speed_overlay"
         )
-        self.canvas.plotter.render()
+        if hasattr(self, 'canvas') and self.canvas:
+            self.canvas.plotter.add_text(
+                text, 
+                position='lower_right', 
+                font_size=12, 
+                color='#1976d2', 
+                name="speed_overlay"
+            )
+            self.canvas.plotter.render()
 
     def on_tab_changed(self, index):
         # Disable dragging for all tabs except 'Links' or 'Simulation'
         is_links = index == self.panel_stack.indexOf(self.links_tab)
         is_sim = index == self.panel_stack.indexOf(self.simulation_tab)
-        self.canvas.enable_drag = (is_links or is_sim)
+        # Only update canvas features if it has been initialized
+        if hasattr(self, 'canvas') and self.canvas is not None:
+            self.canvas.enable_drag = (is_links or is_sim)
 
         # Toggle Gripper Surface button (only visible in Joint Mode)
-        if hasattr(self, 'gripper_surface_btn'):
+        if hasattr(self, 'gripper_surface_btn') and self.gripper_surface_btn:
             self.gripper_surface_btn.setVisible(index == self.panel_stack.indexOf(self.joint_tab))
+
+        # Synchronize Simulation tab content
+        if is_sim and hasattr(self, 'simulation_tab'):
+            self.simulation_tab.update_sliders_from_robot()
+            self.simulation_tab.refresh_sim_objects_list()
+
+        # Update Live UI coordinates
+        self.update_live_ui()
 
         # Identify current widget and trigger refreshes
         widget = self.panel_stack.widget(index)

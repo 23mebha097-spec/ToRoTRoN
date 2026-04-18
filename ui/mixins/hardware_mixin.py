@@ -1,4 +1,4 @@
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtCore
 
 
 class HardwareMixin:
@@ -15,6 +15,7 @@ class HardwareMixin:
         if hasattr(self, "console"):
             self.log(message)
 
+    @QtCore.pyqtSlot(bool)
     def _set_connection_button_ui(self, connected: bool):
         """Keep top-bar connection button style/text in sync with serial state."""
         if connected:
@@ -142,10 +143,24 @@ class HardwareMixin:
             if not port or "detected" in port.lower():
                 self.log("Cannot connect: No serial ports detected.")
                 return
-                
+
+            # --- PREVENT CONFLICTS ---
+            # Temporarily stop all background scans to avoid competing for the port
+            if hasattr(self, 'port_scan_timer'): self.port_scan_timer.stop()
+            if hasattr(self, 'code_drawer') and hasattr(self.code_drawer, 'detect_timer'):
+                self.code_drawer.detect_timer.stop()
+
+            self.log(f"Attempting connection to {port}...")
             if self.serial_mgr.connect(port):
                 self._set_connection_button_ui(True)
-            
+                if hasattr(self, "show_toast"):
+                    self.show_toast(f"✅ Hardware Linked: {self.serial_mgr.port_name}", "success")
+            else:
+                # Restart scans on failure
+                if hasattr(self, 'port_scan_timer'): self.port_scan_timer.start(5000)
+                if hasattr(self, 'code_drawer') and hasattr(self.code_drawer, 'detect_timer'):
+                    self.code_drawer.detect_timer.start(3000)
+
             # Update Hardware Badge in Program Panel
             if hasattr(self, 'program_tab'):
                 self.program_tab.update_hw_badge()
@@ -153,6 +168,49 @@ class HardwareMixin:
             self.serial_mgr.disconnect()
             self._set_connection_button_ui(False)
             
+            # Restart background scans now that port is free
+            if hasattr(self, 'port_scan_timer'): self.port_scan_timer.start(5000)
+            if hasattr(self, 'code_drawer') and hasattr(self.code_drawer, 'detect_timer'):
+                self.code_drawer.detect_timer.start(3000)
+
             # Update Hardware Badge in Program Panel
             if hasattr(self, 'program_tab'):
-                self.program_tab.update_hw_badge()
+                if hasattr(self.program_tab, 'update_hw_badge'):
+                    self.program_tab.update_hw_badge()
+
+    def on_firmware_upload_success(self, port):
+        """Called automatically after a successful code upload to the ESP32."""
+        self.log(f"📡 Firmware uploaded successfully. Initializing Digital Twin sync on {port}...")
+        
+        # Wait for the ESP32 to reboot and become available for serial again
+        def auto_connect_task():
+            import time
+            time.sleep(2.0) # Grace period for reboot
+            
+            # Re-fetch ports silently
+            self.refresh_ports(silent=True)
+            
+            # Attempt to connect
+            if not self.serial_mgr.is_connected:
+                # Use the provided port or the currently selected one
+                target_port = port if port else self.port_combo.currentText()
+                if self.serial_mgr.connect(target_port):
+                    # Use QMetaObject.invokeMethod to safely update UI from background thread
+                    from PyQt5.QtCore import QMetaObject, Qt, Q_ARG
+                    QMetaObject.invokeMethod(self, "_set_connection_button_ui", Qt.QueuedConnection, Q_ARG(bool, True))
+                    self.log("✅ Digital Twin synchronized. Hardware will now mirror simulation.")
+                    
+                    # Push initial state to hardware
+                    self.serial_mgr.sync_all_to_hardware()
+                    
+                    # Ensure simulation runs also sync to hardware by default after upload
+                    if hasattr(self, 'program_tab'):
+                        if hasattr(self.program_tab, 'update_hw_badge'):
+                            QMetaObject.invokeMethod(self.program_tab, "update_hw_badge", Qt.QueuedConnection)
+                        if hasattr(self.program_tab, 'sync_hw_check'):
+                            QMetaObject.invokeMethod(self.program_tab.sync_hw_check, "setChecked", Qt.QueuedConnection, Q_ARG(bool, True))
+                else:
+                    self.log(f"⚠️ Failed to auto-sync Digital Twin on {target_port}. Please connect manually.")
+
+        import threading
+        threading.Thread(target=auto_connect_task, daemon=True).start()

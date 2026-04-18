@@ -1590,7 +1590,6 @@ class JointPanel(QtWidgets.QWidget):
         # Save to local UI cache for persistence
         if self.child_object in self.joints:
             self.joints[self.child_object]['custom_tcp_offset'] = local_pt.tolist()
-            
         self.mw.log(f"✅ Live Point (TCP) set: {np.round(local_pt, 2)} (Local cm)")
         self.mw.show_toast("TCP Position Saved", "success")
         
@@ -1598,4 +1597,23 @@ class JointPanel(QtWidgets.QWidget):
         self.mw.update_live_ui()
 
 
-
+    def refresh_joints(self):
+        """Synchronizes the UI controls with the current robot state."""
+        # Update the currently selected joint's controls if one is active
+        if hasattr(self, 'joint_control_section') and self.joint_control_section.isVisible():
+            if self.active_joint_control and self.active_joint_control in self.mw.robot.links:
+                joint = self.mw.robot.links[self.active_joint_control].parent_joint
+                if joint:
+                    angle = joint.current_value
+                    if hasattr(self, 'joint_control_slider'):
+                        self.joint_control_slider.blockSignals(True)
+                        self.joint_control_slider.setValue(int(angle * 10))
+                        self.joint_control_slider.blockSignals(False)
+                    
+                    if hasattr(self, 'joint_control_spinbox'):
+                        self.joint_control_spinbox.blockSignals(True)
+                        self.joint_control_spinbox.setValue(angle)
+                        self.joint_control_spinbox.blockSignals(False)
+        
+        # Also refresh the history list colors/status
+        self.refresh_joints_history()

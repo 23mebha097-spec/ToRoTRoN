@@ -39,11 +39,16 @@ class MotorAssignDialog(QtWidgets.QDialog):
         self._selection: dict[str, str] = {}
         # maps joint_name → {"servo": QPushButton, "stepper": QPushButton}
         self._btns: dict[str, dict] = {}
-        self._result: dict[str, str] = {}
+        # maps joint_name → QWidget (the config area)
+        self._config_widgets: dict[str, QtWidgets.QWidget] = {}
+        # maps joint_name → detailed config (gear_ratio, servo_type, etc)
+        self._configs: dict[str, dict] = {}
+        
+        self._result: dict[str, dict] = {}
 
-        self.setWindowTitle("Motor Assignment")
+        self.setWindowTitle("Motor & Firmware Config")
         self.setModal(True)
-        self.setMinimumWidth(560)
+        self.setMinimumWidth(720) # Wider to accommodate config columns
         self.setWindowFlags(QtCore.Qt.Dialog | QtCore.Qt.WindowCloseButtonHint)
         self.setStyleSheet(f"""
             QDialog {{
@@ -64,14 +69,14 @@ class MotorAssignDialog(QtWidgets.QDialog):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Title row (no banner — just a clean heading inside body) ─────────
+        # ── Title row ────────────────────────────────────────────────────────
         title_bar = QtWidgets.QWidget()
         title_bar.setStyleSheet(f"background: white; border-bottom: 2px solid {self._BLUE};")
-        title_bar.setFixedHeight(62)
+        title_bar.setFixedHeight(70)
         tb_lay = QtWidgets.QHBoxLayout(title_bar)
         tb_lay.setContentsMargins(24, 0, 24, 0)
 
-        title_lbl = QtWidgets.QLabel("Motor Assignment")
+        title_lbl = QtWidgets.QLabel("Firmware Configuration")
         title_lbl.setStyleSheet(f"""
             color: {self._BLUE};
             font-size: 20px;
@@ -82,13 +87,24 @@ class MotorAssignDialog(QtWidgets.QDialog):
         tb_lay.addWidget(title_lbl)
         tb_lay.addStretch()
 
-        sub_lbl = QtWidgets.QLabel("Select motor type per joint")
-        sub_lbl.setStyleSheet(f"""
-            color: #757575;
-            font-size: 13px;
-            background: transparent;
-        """)
-        tb_lay.addWidget(sub_lbl)
+        headers = QtWidgets.QWidget()
+        headers.setStyleSheet("background: transparent;")
+        h_lay = QtWidgets.QHBoxLayout(headers)
+        h_lay.setContentsMargins(0, 0, 0, 0)
+        h_lay.setSpacing(40)
+        
+        type_h = QtWidgets.QLabel("Motor Type")
+        type_h.setFixedWidth(220)
+        type_h.setAlignment(QtCore.Qt.AlignCenter)
+        config_h = QtWidgets.QLabel("Detailed Config")
+        config_h.setFixedWidth(180)
+        config_h.setAlignment(QtCore.Qt.AlignCenter)
+        
+        for lbl in [type_h, config_h]:
+            lbl.setStyleSheet("color: #757575; font-size: 11px; font-weight: bold; text-transform: uppercase;")
+            h_lay.addWidget(lbl)
+            
+        tb_lay.addWidget(headers)
         root.addWidget(title_bar)
 
         # ── Scrollable joint rows ─────────────────────────────────────────────
@@ -161,9 +177,6 @@ class MotorAssignDialog(QtWidgets.QDialog):
             QPushButton:hover {{
                 background: {self._BLUE_DARK};
             }}
-            QPushButton:pressed {{
-                background: #0d47a1;
-            }}
         """)
         self.generate_btn.clicked.connect(self._on_accept)
 
@@ -198,24 +211,19 @@ class MotorAssignDialog(QtWidgets.QDialog):
             row = self._build_row(name, i)
             self._rows_layout.insertWidget(i, row)
 
-        # Resize dialog to fit rows (max 8 visible without scroll)
-        row_h = 68
+        # Resize dialog
+        row_h = 74
         visible = min(len(joint_names), 8)
         self._rows_widget.setMinimumHeight(visible * row_h)
-        self.setMinimumHeight(62 + visible * row_h + 72)
+        self.setMinimumHeight(70 + visible * row_h + 72)
 
     def _build_row(self, joint_name: str, index: int) -> QtWidgets.QWidget:
         is_even = (index % 2 == 0)
         bg = "white" if is_even else self._GREY_BG
 
         row = QtWidgets.QWidget()
-        row.setFixedHeight(68)
-        row.setStyleSheet(f"""
-            QWidget {{
-                background: {bg};
-                border-bottom: 1px solid {self._BORDER};
-            }}
-        """)
+        row.setFixedHeight(74)
+        row.setStyleSheet(f"QWidget {{ background: {bg}; border-bottom: 1px solid {self._BORDER}; }}")
 
         lay = QtWidgets.QHBoxLayout(row)
         lay.setContentsMargins(20, 0, 20, 0)
@@ -231,144 +239,141 @@ class MotorAssignDialog(QtWidgets.QDialog):
             border-radius: 17px;
             font-size: 13px;
             font-weight: bold;
-            font-family: {self._FONT_FAMILY};
         """)
         lay.addWidget(badge)
 
         # ── Joint name ────────────────────────────────────────────────────
         name_lbl = QtWidgets.QLabel(joint_name)
-        name_lbl.setStyleSheet(f"""
-            color: {self._TEXT};
-            font-size: 17px;
-            font-weight: bold;
-            font-family: {self._FONT_FAMILY};
-            background: transparent;
-        """)
+        name_lbl.setStyleSheet(f"color: {self._TEXT}; font-size: 16px; font-weight: bold;")
         lay.addWidget(name_lbl, 1)
 
         # ── Toggle button pair ────────────────────────────────────────────
         btn_servo   = self._make_toggle_btn("Servo",   "servo")
         btn_stepper = self._make_toggle_btn("Stepper", "stepper")
-
         self._btns[joint_name] = {"servo": btn_servo, "stepper": btn_stepper}
 
-        # Default selection (restore from previous session)
-        default = self._prev.get(joint_name, "servo").lower()
-        self._selection[joint_name] = default
-        self._apply_selection(joint_name, default)
-
-        btn_servo.clicked.connect(
-            lambda _, jn=joint_name: self._select(jn, "servo")
-        )
-        btn_stepper.clicked.connect(
-            lambda _, jn=joint_name: self._select(jn, "stepper")
-        )
-
         btn_group = QtWidgets.QWidget()
-        btn_group.setStyleSheet("background: transparent;")
-        btn_group_lay = QtWidgets.QHBoxLayout(btn_group)
-        btn_group_lay.setContentsMargins(0, 0, 0, 0)
-        btn_group_lay.setSpacing(0)
-        btn_group_lay.addWidget(btn_servo)
-        btn_group_lay.addWidget(btn_stepper)
-
+        btn_group.setFixedWidth(220)
+        bg_lay = QtWidgets.QHBoxLayout(btn_group)
+        bg_lay.setContentsMargins(0, 0, 0, 0)
+        bg_lay.setSpacing(0)
+        bg_lay.addWidget(btn_servo)
+        bg_lay.addWidget(btn_stepper)
         lay.addWidget(btn_group)
+
+        # ── Configuration Slot (Stepper Gear Ratio or Servo Type) ─────────
+        config_slot = QtWidgets.QStackedWidget()
+        config_slot.setFixedWidth(180)
+        
+        # 1. Stepper Config (Ratio)
+        self.stepper_config = QtWidgets.QWidget()
+        sc_lay = QtWidgets.QHBoxLayout(self.stepper_config)
+        sc_lay.setContentsMargins(10, 0, 0, 0)
+        sc_lay.setSpacing(5)
+        
+        lbl_ratio = QtWidgets.QLabel(" Ratio 1:")
+        lbl_ratio.setStyleSheet("color: #757575; font-size: 11px;")
+        
+        ratio_sb = QtWidgets.QDoubleSpinBox()
+        ratio_sb.setRange(0.1, 100.0)
+        ratio_sb.setValue(1.0)
+        ratio_sb.setSingleStep(0.1)
+        ratio_sb.setFixedHeight(32)
+        ratio_sb.setStyleSheet("""
+            QDoubleSpinBox { border: 1px solid #ddd; border-radius: 4px; padding-left: 5px; font-weight: bold; }
+        """)
+        
+        sc_lay.addWidget(lbl_ratio)
+        sc_lay.addWidget(ratio_sb)
+        
+        # 2. Servo Config (Type)
+        self.servo_config = QtWidgets.QWidget()
+        sv_lay = QtWidgets.QHBoxLayout(self.servo_config)
+        sv_lay.setContentsMargins(10, 0, 0, 0)
+        
+        type_cb = QtWidgets.QComboBox()
+        type_cb.addItems(["Standard (0-180)", "Continuous"])
+        type_cb.setFixedHeight(32)
+        type_cb.setStyleSheet("""
+            QComboBox { border: 1px solid #ddd; border-radius: 4px; padding-left: 5px; font-size: 12px; }
+            QComboBox::drop-down { border: none; }
+        """)
+        sv_lay.addWidget(type_cb)
+
+        config_slot.addWidget(self.servo_config)   # Index 0
+        config_slot.addWidget(self.stepper_config) # Index 1
+        lay.addWidget(config_slot)
+        
+        self._config_widgets[joint_name] = config_slot
+        self._configs[joint_name] = {"ratio_sb": ratio_sb, "type_cb": type_cb}
+
+        # Interaction
+        btn_servo.clicked.connect(lambda _, jn=joint_name: self._select(jn, "servo"))
+        btn_stepper.clicked.connect(lambda _, jn=joint_name: self._select(jn, "stepper"))
+
+        # Restore
+        prev_data = self._prev.get(joint_name, {})
+        if isinstance(prev_data, str): 
+            mtype = prev_data.lower()
+        else:
+            mtype = prev_data.get("type", "servo").lower()
+            if mtype == "stepper": ratio_sb.setValue(prev_data.get("gear_ratio", 1.0))
+            if mtype == "servo": type_cb.setCurrentText(prev_data.get("servo_mode", "Standard (0-180)"))
+
+        self._selection[joint_name] = mtype
+        self._apply_selection(joint_name, mtype)
+        
         return row
 
     def _make_toggle_btn(self, label: str, mtype: str) -> QtWidgets.QPushButton:
-        """Creates an unstyled toggle button; style applied via _apply_selection."""
         btn = QtWidgets.QPushButton(label)
         btn.setFixedSize(110, 40)
         btn.setCursor(QtCore.Qt.PointingHandCursor)
         btn.setCheckable(True)
-        # Base style applied immediately; selection highlights via _apply_selection
         return btn
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Selection logic
-    # ─────────────────────────────────────────────────────────────────────────
 
     def _select(self, joint_name: str, mtype: str):
         self._selection[joint_name] = mtype
         self._apply_selection(joint_name, mtype)
+        
+        # Switch config UI
+        stack = self._config_widgets[joint_name]
+        stack.setCurrentIndex(1 if mtype == "stepper" else 0)
 
     def _apply_selection(self, joint_name: str, selected: str):
-        """Applies filled/outlined styles based on which type is selected."""
         btns = self._btns[joint_name]
-
         for mtype, btn in btns.items():
             is_sel = (mtype == selected)
             btn.blockSignals(True)
             btn.setChecked(is_sel)
             btn.blockSignals(False)
             btn.setStyleSheet(self._btn_style(mtype, is_sel))
+        
+        stack = self._config_widgets[joint_name]
+        stack.setCurrentIndex(1 if selected == "stepper" else 0)
 
     def _btn_style(self, mtype: str, selected: bool) -> str:
         if mtype == "servo":
-            sel_bg     = self._BLUE
-            sel_border = self._BLUE_DARK
-            sel_text   = "white"
-            hover_bg   = self._BLUE_LIGHT
-            hover_text = self._BLUE
-            radius_l   = "8px"
-            radius_r   = "0px"
+            sel_bg, sel_border, hover_bg, radius_l, radius_r = self._BLUE, self._BLUE_DARK, self._BLUE_LIGHT, "8px", "0px"
         else:
-            sel_bg     = self._SLATE
-            sel_border = self._SLATE_DARK
-            sel_text   = "white"
-            hover_bg   = self._SLATE_LIGHT
-            hover_text = self._SLATE
-            radius_l   = "0px"
-            radius_r   = "8px"
+            sel_bg, sel_border, hover_bg, radius_l, radius_r = self._SLATE, self._SLATE_DARK, self._SLATE_LIGHT, "0px", "8px"
 
         if selected:
-            return f"""
-                QPushButton {{
-                    background: {sel_bg};
-                    color: {sel_text};
-                    border: 2px solid {sel_border};
-                    border-top-left-radius:     {radius_l};
-                    border-bottom-left-radius:  {radius_l};
-                    border-top-right-radius:    {radius_r};
-                    border-bottom-right-radius: {radius_r};
-                    font-size: 15px;
-                    font-weight: bold;
-                    font-family: {self._FONT_FAMILY};
-                }}
-            """
+            return f"QPushButton {{ background: {sel_bg}; color: white; border: 2px solid {sel_border}; border-top-left-radius: {radius_l}; border-bottom-left-radius: {radius_l}; border-top-right-radius: {radius_r}; border-bottom-right-radius: {radius_r}; font-size: 14px; font-weight: bold; }}"
         else:
-            border_color = self._BLUE if mtype == "servo" else self._SLATE
-            return f"""
-                QPushButton {{
-                    background: white;
-                    color: #757575;
-                    border: 2px solid {self._BORDER};
-                    border-top-left-radius:     {radius_l};
-                    border-bottom-left-radius:  {radius_l};
-                    border-top-right-radius:    {radius_r};
-                    border-bottom-right-radius: {radius_r};
-                    font-size: 15px;
-                    font-weight: bold;
-                    font-family: {self._FONT_FAMILY};
-                }}
-                QPushButton:hover {{
-                    background: {hover_bg};
-                    color: {hover_text};
-                    border-color: {border_color};
-                }}
-            """
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Accept / result
-    # ─────────────────────────────────────────────────────────────────────────
+            border_c = self._BLUE if mtype == "servo" else self._SLATE
+            return f"QPushButton {{ background: white; color: #757575; border: 2px solid {self._BORDER}; border-top-left-radius: {radius_l}; border-bottom-left-radius: {radius_l}; border-top-right-radius: {radius_r}; border-bottom-right-radius: {radius_r}; font-size: 14px; font-weight: bold; }} QPushButton:hover {{ background: {hover_bg}; color: {border_c}; border-color: {border_c}; }}"
 
     def _on_accept(self):
-        self._result = dict(self._selection)
+        self._result = {}
+        for name, mtype in self._selection.items():
+            conf = self._configs[name]
+            if mtype == "stepper":
+                self._result[name] = {"type": "stepper", "gear_ratio": conf["ratio_sb"].value()}
+            else:
+                self._result[name] = {"type": "servo", "servo_mode": conf["type_cb"].currentText()}
         self.accept()
 
     def get_assignments(self) -> dict:
-        """
-        Returns {joint_name: "servo" | "stepper"}.
-        Valid only after dialog.exec_() == QDialog.Accepted.
-        """
         return dict(self._result)
+

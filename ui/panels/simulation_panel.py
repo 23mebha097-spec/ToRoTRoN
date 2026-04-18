@@ -1007,6 +1007,24 @@ class SimulationPanel(QtWidgets.QWidget):
             area_grid.addWidget(x_sb, row, 1)
             area_grid.addWidget(y_sb, row, 2)
             area_grid.addWidget(z_sb, row, 3)
+            
+            pick_btn = QtWidgets.QPushButton("🎯 Pick")
+            pick_btn.setFixedSize(60, 32)
+            pick_btn.setCursor(QtCore.Qt.PointingHandCursor)
+            pick_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #f3e5f5;
+                    color: #7b1fa2;
+                    border: 1px solid #ce93d8;
+                    border-radius: 4px;
+                    font-size: 11px;
+                    font-weight: bold;
+                }
+                QPushButton:hover { background-color: #e1bee7; }
+            """)
+            pick_btn.clicked.connect(lambda _, r=idx: self.start_paint_area_point_pick(r))
+            area_grid.addWidget(pick_btn, row, 4)
+            
             self.paint_area_point_inputs.append((x_sb, y_sb, z_sb))
 
         area_group_layout.addLayout(area_grid)
@@ -1028,6 +1046,23 @@ class SimulationPanel(QtWidgets.QWidget):
         """)
         self.paint_make_area_btn.clicked.connect(self.make_paint_area)
         area_group_layout.addWidget(self.paint_make_area_btn)
+        
+        self.paint_clear_area_btn = QtWidgets.QPushButton("🗑️ Clear Area")
+        self.paint_clear_area_btn.setFixedHeight(38)
+        self.paint_clear_area_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.paint_clear_area_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                color: #7b1fa2;
+                border: 1px solid #ce93d8;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+            QPushButton:hover { background-color: #f3e5f5; }
+        """)
+        self.paint_clear_area_btn.clicked.connect(self.clear_paint_area)
+        area_group_layout.addWidget(self.paint_clear_area_btn)
 
         area_hint = QtWidgets.QLabel(
             "This draws the area in the 3D view and creates the zigzag path used by Start."
@@ -3474,6 +3509,51 @@ class SimulationPanel(QtWidgets.QWidget):
         self.main_window.log("Painting nozzle face selection cleared.")
         self.main_window.show_toast("Nozzle face cleared", "info")
 
+    def start_paint_area_point_pick(self, row_idx):
+        """Start coordinate picking for a specific corner of the manual paint area."""
+        self.main_window.log(f"🎯 Painting Area: Click to set Point P{row_idx + 1} in the 3D scene.")
+        callback = lambda pt: self.on_paint_area_point_picked(row_idx, pt)
+        self.main_window.canvas.start_point_picking(callback)
+
+    def clear_paint_area(self):
+        """Clear the manual paint area inputs and visuals."""
+        for x_sb, y_sb, z_sb in self.paint_area_point_inputs:
+            x_sb.setValue(0.0)
+            y_sb.setValue(0.0)
+            z_sb.setValue(0.0)
+        self.paint_area_points_world = []
+        self.paint_path_points = []
+        self.paint_area_joint_targets = []
+        self._clear_paint_area_preview()
+        self.paint_area_summary.setText("Area: —")
+        self.paint_area_detail.setText("Points: —")
+        self.main_window.log("Painting area cleared.")
+        self.main_window.show_toast("Area cleared", "info")
+
+    def on_paint_area_point_picked(self, row_idx, pt_world):
+        """Update a specific manual paint area coordinate from a 3D pick."""
+        if row_idx >= len(self.paint_area_point_inputs):
+            return
+            
+        ratio = self.main_window.canvas.grid_units_per_cm
+        x_sb, y_sb, z_sb = self.paint_area_point_inputs[row_idx]
+        pt_cm = np.array(pt_world, dtype=float) / ratio
+        
+        x_sb.blockSignals(True)
+        y_sb.blockSignals(True)
+        z_sb.blockSignals(True)
+        x_sb.setValue(pt_cm[0])
+        y_sb.setValue(pt_cm[1])
+        z_sb.setValue(pt_cm[2])
+        x_sb.blockSignals(False)
+        y_sb.blockSignals(False)
+        z_sb.blockSignals(False)
+        
+        self.main_window.log(f"✅ P{row_idx + 1} set to ({pt_cm[0]:.2f}, {pt_cm[1]:.2f}, {pt_cm[2]:.2f}) cm")
+        # Auto-render if all 4 are set
+        if all(sb[0].value() != 0.0 or sb[1].value() != 0.0 for sb in self.paint_area_point_inputs):
+            self.make_paint_area()
+
     def make_paint_area(self):
         """Create a manual paint area from four user-entered 3D points."""
         if len(self.paint_area_point_inputs) != 4:
@@ -3489,14 +3569,17 @@ class SimulationPanel(QtWidgets.QWidget):
             points_world.append(pt_cm * ratio)
 
         pts_world = np.array(points_world, dtype=float)
-        if len(pts_world) != 4:
-            self.main_window.show_toast("Enter exactly 4 points", "warning")
-            return
-
+        
+        # --- VALIDATE QUADRILATERAL ---
+        # A painting area must be a reasonably large convex quad.
         diag_len = max(
             float(np.linalg.norm(pts_world[2] - pts_world[0])),
             float(np.linalg.norm(pts_world[3] - pts_world[1])),
         )
+        if diag_len < 1.0: # Too small
+             self.main_window.show_toast("Area too small (diagonal < 1cm)", "warning")
+             return
+
         area_cm2 = self._quad_area_cm2(points_cm)
         self.paint_area_points_world = [p.copy() for p in pts_world]
         self.paint_path_points = self._build_paint_area_path(pts_world)
@@ -3814,6 +3897,29 @@ class SimulationPanel(QtWidgets.QWidget):
         except Exception:
             pass
 
+    def _is_point_in_quad(self, pt, quad_pts):
+        """Standard 2D polygon check (Point in Polygon) using ray-casting logic on the work-plane."""
+        # Project 3D points onto best-fit plane for robust 2D check
+        # For simplicity in this robotics context, we check if the point 
+        # is on the 'correct' side of all 4 edges.
+        p = np.array(pt, dtype=float)[:2]
+        poly = [np.array(pts, dtype=float)[:2] for pts in quad_pts]
+        
+        inside = False
+        n = len(poly)
+        p1x, p1y = poly[0]
+        for i in range(n + 1):
+            p2x, p2y = poly[i % n]
+            if p[1] > min(p1y, p2y):
+                if p[1] <= max(p1y, p2y):
+                    if p[0] <= max(p1x, p2x):
+                        if p1y != p2y:
+                            xints = (p[1] - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                        if p1x == p2x or p[0] <= xints:
+                            inside = not inside
+            p1x, p1y = p2x, p2y
+        return inside
+
     def _safe_on_paint_tick(self):
         """Advance the painting motion while keeping runtime errors contained."""
         try:
@@ -3859,6 +3965,15 @@ class SimulationPanel(QtWidgets.QWidget):
                     f"🎨 Painting waypoint {self.paint_current_point_idx + 1}/{len(self.paint_path_points)} "
                     f"using precomputed joint targets at ({target_world[0]/ratio:.2f}, {target_world[1]/ratio:.2f}, {target_world[2]/ratio:.2f}) cm"
                 )
+                
+                # --- BOUNDARY ENFORCEMENT: Nozzle Face cannot go beyond area ---
+                if hasattr(self, 'paint_area_points_world') and len(self.paint_area_points_world) == 4:
+                    if not self._is_point_in_quad(target_world, self.paint_area_points_world):
+                        self.main_window.log("🛑 PAINT SAFETY: Nozzle target out of bounds. Skipping waypoint.")
+                        self.paint_current_point_idx += 1
+                        self.paint_motion_state = "SOLVE_POINT"
+                        return
+
                 return
 
             if self.paint_nozzle_tcp_offset is not None:
@@ -4485,6 +4600,16 @@ class SimulationPanel(QtWidgets.QWidget):
                         slave_joint.max_limit
                     )
         self.main_window.robot.update_kinematics()
+        
+        # --- DIGITAL TWIN: Sync to hardware in real-time if connected ---
+        if hasattr(self.main_window, 'serial_mgr') and self.main_window.serial_mgr.is_connected:
+            # We send both the primary joint and slaves to ensure precise 'Digital Twin' behavior
+            self.main_window.serial_mgr.send_command(joint.name, float(val), speed=float(self.main_window.current_speed))
+            
+            if joint.name in self.main_window.robot.joint_relations:
+                for slave_id, ratio in self.main_window.robot.joint_relations[joint.name]:
+                    slave_val = float(val) * ratio
+                    self.main_window.serial_mgr.send_command(slave_id, slave_val, speed=float(self.main_window.current_speed))
 
     def _sync_all_sliders(self):
         for name, data in self.sliders.items():

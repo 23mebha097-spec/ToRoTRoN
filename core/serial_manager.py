@@ -110,7 +110,6 @@ class SerialManager:
         
     def connect(self, port_name, baudrate=115200):
         """Opens the serial connection. Supports 'COMx' or 'COMx (Desc)' formats."""
-        # Strip description if present: "COM6 (USB-Serial)" -> "COM6"
         raw_port = port_name.split("(", 1)[0].strip()
         self.last_error = ""
 
@@ -120,28 +119,36 @@ class SerialManager:
         last_exc = None
         for attempt in range(1, 6):
             try:
-                self.serial_port = serial.Serial(raw_port, baudrate, timeout=0.05, write_timeout=0.2)
-
-                # --- ESP32 STABILITY FIX ---
-                # Explicitly release DTR/RTS to prevent the board from staying in 'Boot/Download' mode.
-                # Some flaky USB drivers fail on control-line writes immediately after open.
+                # Open with defaults first
+                self.serial_port = serial.Serial(
+                    port=raw_port, 
+                    baudrate=baudrate, 
+                    timeout=0.08, 
+                    write_timeout=0.25
+                )
+                
+                # Give the driver a moment to 'settle' before we nudge DTR/RTS.
+                # CH343/CH340 drivers often crash if we flip DTR/RTS within microseconds of open.
+                time.sleep(0.15)
+                
                 try:
                     self.serial_port.dtr = False
                     self.serial_port.rts = False
                 except Exception:
+                    # Some drivers throw errors on dtr=False, ignore them if port is open
                     pass
 
                 self.serial_port.reset_input_buffer()
                 self.serial_port.reset_output_buffer()
 
-                # Store canonical raw COM name (e.g., COM5) for stable matching.
+                # Store canonical raw COM name (e.g., COM5)
                 self.port_name = raw_port
                 self.baudrate = baudrate
                 self.is_connected = True
                 self.last_heartbeat_rx = time.time()
                 self._last_sent.clear()
                 self._rx_counters.clear()
-                self.mw.log_signal.emit(f"Connected to ESP32 on {raw_port} (DTR/RTS Released).")
+                self.mw.log_signal.emit(f"✅ Connected to {raw_port} @ {baudrate} baud.")
 
                 # Start a background listener thread
                 self.stop_listener = False
@@ -184,22 +191,28 @@ class SerialManager:
         low = text.lower()
         hints = []
 
-        if "access is denied" in low:
-            hints.append("port is busy (Arduino IDE Serial Monitor / another app)")
-        if "permissionerror(13" in low and "access is denied" not in low:
-            hints.append("USB serial driver/device is unstable or reconnecting")
-        if "cannot configure port" in low or "device attached to the system is not functioning" in low:
-            hints.append("USB device/driver is in a bad state")
-        if "file not found" in low or "could not open port" in low:
-            hints.append("port disappeared or COM mapping changed")
+        # Windows-specific error codes
+        win_error = getattr(exc, "winerror", None)
+        if win_error == 31: # ERROR_GEN_FAILURE
+            hints.append("USB driver state unstable (Error 31: Device not functioning)")
+        if win_error == 5: # ERROR_ACCESS_DENIED
+            hints.append("Port busy (already open in another app)")
 
-        if not hints:
-            hints.append("unknown cause")
+        if "access is denied" in low:
+            hints.append("port is busy (Arduino IDE / Serial Monitor)")
+        if "permissionerror(13" in low:
+            hints.append("USB driver/device is unstable or reconnecting")
+        if "cannot configure port" in low or "device attached" in low:
+            hints.append("USB driver failure")
+        if "file not found" in low:
+            hints.append("port disappeared")
+
+        if not hints: hints.append("unknown hardware issue")
 
         hint_text = "; ".join(hints)
         return (
-            f"{text}. Likely cause: {hint_text}. "
-            f"Try unplug/replug the board, close serial tools, and reconnect {raw_port}."
+            f"{text}. Solution: 1. Wait 3 seconds. 2. Unplug/Replug USB. 3. Re-select {raw_port} in top bar. "
+            f"(Internal: {hint_text})"
         )
             
     def disconnect(self):
@@ -265,11 +278,25 @@ class SerialManager:
             # Format: joint_id:angle:speed\n
             # e.g. shoulder:45.00:10.00\n
             command = f"{joint_id}:{angle:.2f}:{speed:.2f}\n"
-            self._write_line(command)
+            if self._write_line(command):
+                # Log to terminal so user can see the 'Digital Twin' signals
+                self.mw.log_signal.emit(f"📡 [TX]: {command.strip()}")
             self._last_sent[joint_id] = (float(angle), float(speed), now)
         except Exception as e:
             self._log(f"Serial Send Error: {e}")
             self.disconnect()
+
+    def sync_all_to_hardware(self):
+        """Immediately broadcast the robot's current 3D state to the physical board."""
+        if not self.is_connected or not self.mw.robot:
+            return
+            
+        self._log("📡 Initializing full hardware state sync...")
+        speed = float(getattr(self.mw, 'current_speed', 50))
+        for jid, joint in self.mw.robot.joints.items():
+            self.send_command(jid, joint.current_deg, speed=speed)
+            time.sleep(0.01) # Small gap between initial bulk messages
+        self._log("✅ All joint signals synchronized.")
 
     def _heartbeat_loop(self):
         """Sends a periodic 'PING' command to check if ESP32 is alive."""

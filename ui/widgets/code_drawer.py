@@ -7,6 +7,7 @@ import shutil
 import re
 import serial
 import serial.tools.list_ports
+import json
 
 _WORKSPACE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -62,11 +63,11 @@ def _find_arduino_cli() -> str | None:
 
 class CodeDrawer(QtWidgets.QWidget):
     upload_status_signal = QtCore.pyqtSignal(str, bool)  # message, is_error
-    preflight_finished_signal = QtCore.pyqtSignal(bool)
 
     def __init__(self, main_window):
         super().__init__(main_window)
         self.mw = main_window
+        print("[DEBUG] CodeDrawer Initialized (v2_fixed)")
 
         self.layout = QtWidgets.QVBoxLayout(self)
         self.layout.setContentsMargins(10, 10, 10, 10)
@@ -128,7 +129,8 @@ class CodeDrawer(QtWidgets.QWidget):
 
         self.fqbn_combo = QtWidgets.QComboBox()
         self.fqbn_combo.addItems([
-            "esp32:esp32:esp32s3        (ESP32-S3)",
+            "esp32:esp32:esp32s3        (ESP32-S3 QIO)",
+            "esp32:esp32:esp32s3:FlashMode=dio (ESP32-S3 DIO - Stable)",
             "esp32:esp32:esp32          (ESP32)",
             "esp32:esp32:esp32s2        (ESP32-S2)",
             "esp32:esp32:esp32c3        (ESP32-C3)",
@@ -170,27 +172,29 @@ class CodeDrawer(QtWidgets.QWidget):
         self.copy_btn.clicked.connect(self.copy_code)
         btn_layout.addWidget(self.copy_btn)
 
-        self.preflight_btn = QtWidgets.QPushButton("⚡ PREFLIGHT")
-        self.preflight_btn.setToolTip("Quick check: CLI, core, COM port, and board target")
-        self.preflight_btn.setStyleSheet("""
+
+        self.build_btn = QtWidgets.QPushButton("🛠️ BUILD FIRMWARE")
+        self.build_btn.setToolTip("Compile the firmware to check for errors")
+        self.build_btn.setStyleSheet("""
             QPushButton {
-                background-color: #455a64;
+                background-color: #1976d2;
                 color: white;
                 font-weight: bold;
                 padding: 10px;
                 border-radius: 8px;
             }
-            QPushButton:hover { background-color: #546e7a; }
+            QPushButton:hover { background-color: #1565c0; }
             QPushButton:disabled {
                 background-color: #2c3e50;
                 color: #7f8c8d;
             }
         """)
-        self.preflight_btn.clicked.connect(self.run_preflight_check)
-        btn_layout.addWidget(self.preflight_btn)
+        self.build_btn.clicked.connect(self.build_firmware)
+        btn_layout.addWidget(self.build_btn)
 
-        self.upload_btn = QtWidgets.QPushButton("🚀 UPLOAD")
-        self.upload_btn.setToolTip("Compile and Upload to ESP32-S3 via arduino-cli")
+        self.upload_btn = QtWidgets.QPushButton("🚀 UPLOAD CODE")
+        self.upload_btn.setToolTip("Upload the pre-built firmware to the detected board")
+        self.upload_btn.setEnabled(False)  # Disabled until build succeeds
         self.upload_btn.setStyleSheet("""
             QPushButton {
                 background-color: #27ae60;
@@ -217,9 +221,17 @@ class CodeDrawer(QtWidgets.QWidget):
         self.layout.addWidget(self.status_label)
 
         self.upload_status_signal.connect(self.on_upload_status)
-        self.preflight_finished_signal.connect(self._on_preflight_finished)
+        # ── Polling Timer for Auto-Detection ────────────────────────────────
+        self.detect_timer = QtCore.QTimer(self)
+        self.detect_timer.timeout.connect(self._auto_detect_hardware)
+        self.detect_timer.start(3000)  # Check every 3 seconds
+
         self._upload_in_progress = False
         self._preflight_in_progress = False
+        self._build_successful = False
+        self._detected_port = None
+        self._detected_board = None
+
         self._core_check_cache = {}  # {core_key: (ok, message, ts)}
         self._workspace_root = _WORKSPACE_ROOT
         self._arduino_runtime_root = os.path.join(self._workspace_root, ".arduino_runtime")
@@ -241,6 +253,77 @@ class CodeDrawer(QtWidgets.QWidget):
             self.mw.log_signal.emit(str(message))
         elif hasattr(self.mw, "log"):
             self.mw.log(str(message))
+
+    def _auto_detect_hardware(self):
+        """Poll arduino-cli to detect connected boards and match them with UI targets."""
+        self._update_button_states() # Keep UI sync with SerialManager state
+        
+        if self._upload_in_progress or self._preflight_in_progress:
+            return
+
+        cli_path = _find_arduino_cli()
+        if not cli_path:
+            return
+
+        def task():
+            try:
+                result = subprocess.run(
+                    [cli_path, "board", "list", "--format", "json"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    env=self._cli_env()
+                )
+                if result.returncode == 0:
+                    data = json.loads(result.stdout)
+                    # arduino-cli returns a list or a dict depending on version
+                    boards = data if isinstance(data, list) else data.get("detected_ports", [])
+                    
+                    for info in boards:
+                        port = info.get("port", {}).get("address")
+                        matching_boards = info.get("matching_boards", [])
+                        
+                        if port and matching_boards:
+                            fqbn = matching_boards[0].get("fqbn")
+                            name = matching_boards[0].get("name")
+                            
+                            if fqbn and port:
+                                # Synchronize with UI if different
+                                if port != self._detected_port or fqbn != self._detected_board:
+                                    self._detected_port = port
+                                    self._detected_board = fqbn
+                                    QtCore.QMetaObject.invokeMethod(self, "_update_ui_from_detection", 
+                                                                  QtCore.Qt.QueuedConnection,
+                                                                  QtCore.Q_ARG(str, port),
+                                                                  QtCore.Q_ARG(str, fqbn),
+                                                                  QtCore.Q_ARG(str, name))
+                                return # Pick first matching board
+                
+                # If no board found, reset detection memory but don't force UI reset yet
+                # to avoid jitter if cable is loose
+            except Exception:
+                pass
+
+        threading.Thread(target=task, daemon=True).start()
+
+    @QtCore.pyqtSlot(str, str, str)
+    def _update_ui_from_detection(self, port, fqbn, name):
+        """Update the FQBN combo and port info based on auto-detection."""
+        self._log(f"📋 Hardware detected: {name} on {port}")
+        
+        # 1. Update FQBN Combo
+        for i in range(self.fqbn_combo.count()):
+            if fqbn in self.fqbn_combo.itemText(i):
+                self.fqbn_combo.setCurrentIndex(i)
+                break
+        else:
+            # If not in list, add it temporarily or log it
+            self.fqbn_combo.addItem(f"{fqbn} ({name})")
+            self.fqbn_combo.setCurrentIndex(self.fqbn_combo.count() - 1)
+
+        # 2. Update status label for visual confirmation
+        self.status_label.setText(f"Auto-selected: {name} ({port})")
+        self.status_label.setStyleSheet("color: #27ae60; font-size: 10px; font-weight: bold;")
 
     def _cli_env(self):
         """Environment override for arduino-cli to avoid OneDrive temp/library paths."""
@@ -408,75 +491,6 @@ class CodeDrawer(QtWidgets.QWidget):
         )
         thread.start()
 
-    def run_preflight_check(self):
-        """Run quick preflight checks before upload."""
-        if self._upload_in_progress:
-            self.on_upload_status("Upload in progress; preflight blocked", True)
-            return
-        if self._preflight_in_progress:
-            self.on_upload_status("Preflight already running...", False)
-            return
-
-        self._preflight_in_progress = True
-        self.preflight_btn.setEnabled(False)
-        self.upload_btn.setEnabled(False)
-        self.upload_status_signal.emit("Running preflight checks...", False)
-
-        thread = threading.Thread(target=self._run_preflight_process, daemon=True)
-        thread.start()
-
-    def _run_preflight_process(self):
-        """Background preflight validation: cli, fqbn, port, and core."""
-        ok = False
-        try:
-            cli_path = _find_arduino_cli()
-            if not cli_path:
-                self.upload_status_signal.emit("❌ arduino-cli not found", True)
-                return
-
-            fqbn = self._selected_fqbn()
-            if len(fqbn.split(":")) != 3:
-                self.upload_status_signal.emit("❌ Invalid board target (FQBN)", True)
-                return
-
-            port = ""
-            if hasattr(self.mw, "serial_mgr") and self.mw.serial_mgr.port_name:
-                port = self.mw.serial_mgr.port_name
-            if not port:
-                port = self.mw.port_combo.currentText()
-            port = port.split()[0].strip()
-
-            if not port or port.lower() in ("", "no ports found"):
-                self.upload_status_signal.emit("❌ No COM port selected", True)
-                return
-
-            available_ports = {p.device.upper() for p in serial.tools.list_ports.comports()}
-            if port.upper() not in available_ports:
-                self.upload_status_signal.emit(f"❌ {port} not detected", True)
-                return
-
-            core_key = ":".join(fqbn.split(":")[:2])
-            core_ok, core_msg = self._check_core_installed(cli_path, core_key)
-            if not core_ok:
-                self.upload_status_signal.emit(f"❌ {core_msg}", True)
-                return
-
-            required_libs = self._required_libraries_from_code(self.code_edit.toPlainText())
-            missing_libs = self._missing_libraries(cli_path, required_libs)
-            if missing_libs:
-                names = ", ".join(name for name, _ in missing_libs)
-                self.upload_status_signal.emit(
-                    f"❌ Missing libraries: {names}. They will auto-install during Upload.",
-                    True,
-                )
-                return
-
-            self.upload_status_signal.emit(f"✅ Preflight OK: {port} | {fqbn}", False)
-            ok = True
-        except Exception as e:
-            self.upload_status_signal.emit(f"❌ Preflight error: {e}", True)
-        finally:
-            self.preflight_finished_signal.emit(ok)
 
     def _check_core_installed(self, cli_path: str, core_key: str):
         """Check installed board core, caching results briefly for speed."""
@@ -510,65 +524,102 @@ class CodeDrawer(QtWidgets.QWidget):
         self._core_check_cache[core_key] = (False, msg, now)
         return False, msg
 
-    def _on_preflight_finished(self, _ok: bool):
-        self._preflight_in_progress = False
-        self.preflight_btn.setEnabled(True)
-        if not self._upload_in_progress:
-            self.upload_btn.setEnabled(True)
+    def build_firmware(self):
+        """Pre-compiles the firmware code to verify correctness before upload."""
+        if self._upload_in_progress or self._preflight_in_progress:
+            return
 
-    def _candidate_upload_ports(self, preferred_port: str):
-        """Return upload port candidates with ESP32-like ports first."""
-        available = [p.device for p in serial.tools.list_ports.comports()]
-        if not available:
-            return [preferred_port] if preferred_port else []
+        cli_path = _find_arduino_cli()
+        if not cli_path:
+            self._show_cli_missing_dialog()
+            return
 
-        candidates = []
-        if preferred_port and preferred_port in available:
-            candidates.append(preferred_port)
+        code_text = self.code_edit.toPlainText().strip()
+        if not code_text:
+            self.on_upload_status("No firmware code to build", True)
+            return
 
-        # Prefer ports recognized as ESP32-like by SerialManager metadata.
-        for label in self.mw.serial_mgr.get_available_ports():
-            raw = label.split("(", 1)[0].strip()
-            if raw not in available or raw in candidates:
-                continue
-            is_esp = False
-            if hasattr(self.mw.serial_mgr, "is_esp32_label"):
-                try:
-                    is_esp = self.mw.serial_mgr.is_esp32_label(label)
-                except Exception:
-                    is_esp = False
-            if is_esp:
-                candidates.append(raw)
+        self._preflight_in_progress = True
+        self.build_btn.setEnabled(False)
+        self.upload_btn.setEnabled(False)
+        self.upload_status_signal.emit("Building firmware (Compiling)...", False)
 
-        for dev in available:
-            if dev not in candidates:
-                candidates.append(dev)
-        return candidates
+        def task():
+            sketch_dir = os.path.join(self._workspace_root, "firmware", "torotron_esp32")
+            os.makedirs(sketch_dir, exist_ok=True)
+            ino_path = os.path.join(sketch_dir, "torotron_esp32.ino")
+            fqbn = self._selected_fqbn()
+            build_dir = os.path.join(self._workspace_root, ".build", "arduino", re.sub(r"[^a-zA-Z0-9_.-]", "_", fqbn))
+            os.makedirs(build_dir, exist_ok=True)
 
-    def _compile_only(self, cli_path: str, fqbn: str, build_dir: str, sketch_dir: str):
-        """Compile firmware once; upload will be retried separately."""
+            try:
+                # Write sketch
+                with open(ino_path, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(code_text)
+                
+                required_libs = self._required_libraries_from_code(code_text)
+                libs_ok, libs_msg = self._ensure_required_libraries(cli_path, required_libs)
+                if not libs_ok:
+                    self.upload_status_signal.emit(f"❌ {libs_msg}", True)
+                    return
+
+                res = self._compile_only(cli_path, fqbn, build_dir, sketch_dir)
+                if res.returncode == 0:
+                    self._build_successful = True
+                    self._log("✅ Build successful.")
+                    self.upload_status_signal.emit("✅ Build complete. Ready for Upload.", False)
+                else:
+                    self._build_successful = False
+                    err = (res.stderr or res.stdout or "Compilation failed").strip()
+                    self.upload_status_signal.emit(f"❌ Build failed: {self._summarize_upload_error(err)}", True)
+                    self._log(f"❌ Build failed:\n{err}")
+            except Exception as e:
+                self.upload_status_signal.emit(f"❌ Build error: {e}", True)
+            finally:
+                self._preflight_in_progress = False
+                QtCore.QMetaObject.invokeMethod(self, "_update_button_states", QtCore.Qt.QueuedConnection)
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def _compile_only(self, cli_path, fqbn, build_dir, sketch_dir):
+        """Runs arduino-cli compile without uploading."""
         cmd = [
-            cli_path,
-            "compile",
+            cli_path, "compile",
             "--fqbn", fqbn,
             "--build-path", build_dir,
-            sketch_dir,
+            sketch_dir
         ]
-        self._log(f"CMD: {' '.join(cmd)}")
+        self._log(f"Compiling: {' '.join(cmd)}")
         return subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            timeout=240,
+            timeout=180,
             cwd=self._workspace_root,
-            env=self._cli_env(),
+            env=self._cli_env()
         )
 
-    def _upload_built_sketch(self, cli_path: str, port: str, fqbn: str, build_dir: str, sketch_dir: str, upload_speed: int):
-        """Upload precompiled binaries with explicit upload speed for stability."""
+    @QtCore.pyqtSlot()
+    def _update_button_states(self):
+        is_connected = getattr(self.mw.serial_mgr, "is_connected", False)
+        self.build_btn.setEnabled(True)
+        self.upload_btn.setEnabled(self._build_successful and is_connected)
+        
+        # update tooltips to help the user
+        if not is_connected:
+            self.upload_btn.setToolTip("Upload disabled: Hardware not connected.")
+        elif not self._build_successful:
+            self.upload_btn.setToolTip("Upload disabled: Build the firmware first.")
+        else:
+            self.upload_btn.setToolTip("Ready to upload firmware to ESP32.")
+
+    def _upload_built_sketch(self, cli_path, port, fqbn, build_dir, sketch_dir, upload_speed):
+        """
+        Upload precompiled binaries using Popen to capture real-time progress.
+        Returns (returncode, full_output_text).
+        """
         cmd = [
-            cli_path,
-            "upload",
+            cli_path, "upload",
             "--port", port,
             "--fqbn", fqbn,
             "--input-dir", build_dir,
@@ -577,14 +628,44 @@ class CodeDrawer(QtWidgets.QWidget):
             sketch_dir,
         ]
         self._log(f"CMD: {' '.join(cmd)}")
-        return subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=180,
-            cwd=self._workspace_root,
-            env=self._cli_env(),
-        )
+        
+        full_output = []
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, 
+                text=True,
+                bufsize=1,
+                universal_newlines=True,
+                cwd=self._workspace_root,
+                env=self._cli_env()
+            )
+            
+            last_progress_time = 0
+            while True:
+                line = process.stdout.readline()
+                if not line and process.poll() is not None:
+                    break
+                if not line:
+                    continue
+                
+                full_output.append(line)
+                match = re.search(r"(\d+)\s*%", line)
+                if match:
+                    percent = int(match.group(1))
+                    now = time.time()
+                    if now - last_progress_time >= 1.5:
+                        self.upload_status_signal.emit(f"Uploading: {percent}% complete", False)
+                        last_progress_time = now
+                
+                self._log(f"[UPLOAD] {line.strip()}")
+            
+            return process.returncode, "".join(full_output)
+        except Exception as e:
+            err_msg = f"Upload process failed to start: {e}"
+            self._log(f"❌ {err_msg}")
+            return -1, err_msg
 
     def _trigger_bootloader_mode(self, port: str):
         """Best-effort ESP32 auto-boot sequence via DTR/RTS before upload attempt."""
@@ -613,6 +694,15 @@ class CodeDrawer(QtWidgets.QWidget):
             self._log(f"Bootloader trigger skipped on {port}: {e}")
             return False
 
+    def _candidate_upload_ports(self, preferred_port: str):
+        """Return a list of COM ports to attempt, starting with the preferred one."""
+        available = [p.device for p in serial.tools.list_ports.comports()]
+        if preferred_port in available:
+            # Shift preferred to front
+            available.remove(preferred_port)
+            return [preferred_port] + available
+        return available if available else [preferred_port]
+
     def _run_upload_process(self, cli_path: str, port: str, fqbn: str, required_libs):
         """Background thread: write .ino → compile once → retry upload safely."""
         sketch_dir = os.path.join(self._workspace_root, "firmware", "torotron_esp32")
@@ -636,19 +726,8 @@ class CodeDrawer(QtWidgets.QWidget):
                 self.mw.serial_mgr.disconnect()
                 time.sleep(1.2)
 
-            # 3. Compile + Upload
-            libs_ok, libs_msg = self._ensure_required_libraries(cli_path, required_libs)
-            if not libs_ok:
-                self.upload_status_signal.emit(f"❌ {libs_msg}", True)
-                return
-
-            self.upload_status_signal.emit(f"Compiling firmware ({fqbn})...", False)
-            compile_result = self._compile_only(cli_path, fqbn, build_dir, sketch_dir)
-            if compile_result.returncode != 0:
-                err = (compile_result.stderr or compile_result.stdout or "Compilation failed").strip()
-                self.upload_status_signal.emit(f"❌ {self._summarize_upload_error(err)}", True)
-                self._log(f"❌ Compile failed:\n{err}")
-                return
+            # 3. Upload pre-built binaries
+            self.upload_status_signal.emit("Initializing upload process...", False)
 
             # Upload retries for ESP32 bootloader timing issues.
             upload_ok = False
@@ -671,7 +750,7 @@ class CodeDrawer(QtWidgets.QWidget):
                     self.upload_status_signal.emit(f"Preparing bootloader on {target_port}...", False)
                     self._trigger_bootloader_mode(target_port)
 
-                    result = self._upload_built_sketch(
+                    ret_code, output = self._upload_built_sketch(
                         cli_path=cli_path,
                         port=target_port,
                         fqbn=fqbn,
@@ -680,12 +759,12 @@ class CodeDrawer(QtWidgets.QWidget):
                         upload_speed=speed,
                     )
 
-                    if result.returncode == 0:
+                    if ret_code == 0:
                         upload_ok = True
                         port = target_port
                         break
 
-                    last_err = (result.stderr or result.stdout or "Unknown upload error").strip()
+                    last_err = output.strip() if output else "Unknown upload error"
                     self._log(f"Upload attempt failed ({target_port} @ {speed}):\n{last_err}")
 
                     # If bootloader handshake failed, keep retrying with next strategy.
@@ -700,6 +779,13 @@ class CodeDrawer(QtWidgets.QWidget):
             if upload_ok:
                 self.upload_status_signal.emit("✅ Upload successful!", False)
                 self._log("✅ Firmware uploaded to ESP32 successfully.")
+                self._build_successful = False # Reset build state after successful upload
+                self.upload_btn.setEnabled(False) 
+                
+                # --- DIGITAL TWIN TRIGGER ---
+                # After successful upload, notify MainWindow to initialize Twin sync
+                if hasattr(self.mw, "on_firmware_upload_success"):
+                    self.mw.on_firmware_upload_success(port)
             else:
                 # Final assisted fallback for boards that require manual BOOT/RESET timing.
                 lower_err = (last_err or "").lower()
@@ -707,7 +793,7 @@ class CodeDrawer(QtWidgets.QWidget):
                     self._log("Manual boot fallback: Hold BOOT, press RESET once, keep BOOT held for ~2 seconds.")
                     self.upload_status_signal.emit("Manual boot mode: hold BOOT, tap RESET now...", True)
                     time.sleep(3.0)
-                    manual_result = self._upload_built_sketch(
+                    m_code, m_out = self._upload_built_sketch(
                         cli_path=cli_path,
                         port=port,
                         fqbn=fqbn,
@@ -715,16 +801,16 @@ class CodeDrawer(QtWidgets.QWidget):
                         sketch_dir=sketch_dir,
                         upload_speed=115200,
                     )
-                    if manual_result.returncode == 0:
+                    if m_code == 0:
                         self.upload_status_signal.emit("✅ Upload successful (manual boot mode)!", False)
                         self._log("✅ Firmware uploaded to ESP32 successfully (manual boot mode).")
                         upload_ok = True
+                        if hasattr(self.mw, "on_firmware_upload_success"):
+                            self.mw.on_firmware_upload_success(port)
                     else:
-                        last_err = (manual_result.stderr or manual_result.stdout or last_err or "Unknown upload error").strip()
+                        last_err = m_out.strip() if m_out else "Manual upload failed"
 
-            if upload_ok:
-                pass
-            else:
+            if not upload_ok:
                 short_err = self._summarize_upload_error(last_err)
                 self.upload_status_signal.emit(f"❌ {short_err}", True)
                 self._log(f"❌ Upload failed:\n{last_err}")
@@ -737,20 +823,8 @@ class CodeDrawer(QtWidgets.QWidget):
             self.upload_status_signal.emit(f"❌ Unexpected upload error: {e}", True)
 
         finally:
-            # 4. Reconnect serial with retries
-            if was_connected:
-                self.upload_status_signal.emit("Reconnecting serial...", False)
-                reconnected = False
-                for _ in range(8):
-                    time.sleep(0.75)
-                    try:
-                        if self.mw.serial_mgr.connect(port):
-                            reconnected = True
-                            break
-                    except Exception:
-                        pass
-                if not reconnected:
-                    self.upload_status_signal.emit("⚠️ Upload done, but serial reconnect failed", True)
+            # Reconnection handled by MainWindow.on_firmware_upload_success if successful
+            pass
 
             self.upload_status_signal.emit("Ready.", False)
 
@@ -835,6 +909,7 @@ class CodeDrawer(QtWidgets.QWidget):
     # ─────────────────────────────────────────────────────────────────────────
 
     def on_upload_status(self, msg: str, is_error: bool):
+        if msg is None: return
         self.status_label.setText(msg)
         if is_error:
             self.status_label.setStyleSheet("color: #ff5555; font-size: 11px;")
@@ -853,6 +928,11 @@ class CodeDrawer(QtWidgets.QWidget):
         if "Ready" in msg:
             self._upload_in_progress = False
             self.upload_btn.setEnabled(True)
-            self.preflight_btn.setEnabled(True)
+            self.build_btn.setEnabled(True)
             if hasattr(self.mw, "port_scan_timer"):
                 self.mw.port_scan_timer.start(5000)
+
+        # Help user with SHA-256 boot errors
+        if "SHA-256" in msg:
+            self.status_label.setText("⚠ ESP32 Boot Error: SHA-256 Mismatch. Try DIO mode or lower baud.")
+            self.status_label.setStyleSheet("color: #ff9800; font-size: 10px;")
