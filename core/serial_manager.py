@@ -257,6 +257,15 @@ class SerialManager:
                 break
             time.sleep(0.01)
 
+    def send_raw(self, line):
+        """Sends a raw string command to the ESP32."""
+        if not self.is_connected or not self.serial_port:
+            return
+        try:
+            self._write_line(line)
+        except Exception as e:
+            self._log(f"Serial Send Raw Error: {e}")
+
     def send_command(self, joint_id, angle, speed=0):
         """Sends a joint command to the ESP32: 'joint_id:angle:speed\\n'"""
         if not self.is_connected or not self.serial_port:
@@ -286,13 +295,13 @@ class SerialManager:
             self._log(f"Serial Send Error: {e}")
             self.disconnect()
 
-    def sync_all_to_hardware(self):
+    def sync_all_to_hardware(self, speed=None):
         """Immediately broadcast the robot's current 3D state to the physical board."""
         if not self.is_connected or not self.mw.robot:
             return
             
         self._log("📡 Initializing full hardware state sync...")
-        speed = float(getattr(self.mw, 'current_speed', 50))
+        speed = float(getattr(self.mw, 'current_speed', 50) if speed is None else speed)
         for jid, joint in self.mw.robot.joints.items():
             self.send_command(jid, joint.current_deg, speed=speed)
             time.sleep(0.01) # Small gap between initial bulk messages

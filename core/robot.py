@@ -41,6 +41,7 @@ class Joint:
         self.gripping_surface_link_name = None
         self.gripping_surface_center_local = None
         self.gripping_surface_normal_local = None
+        self.gripping_surface_touch_only = False
         self.paired_gripping_enabled = False
         self.paired_gripping_surface_joint_name = None
         self.paired_gripping_surface_name = None

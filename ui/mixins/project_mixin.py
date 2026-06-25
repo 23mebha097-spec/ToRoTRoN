@@ -32,6 +32,13 @@ class ProjectMixin:
                 os.makedirs(mesh_dir)
 
                 robot_data = {
+                    "meta": {
+                        # The project format stores meshes exported from the current session.
+                        # Our internal world units are millimeters (canvas.grid_units_per_cm = 10.0).
+                        # STL is unitless, so we must persist the intended unit system explicitly.
+                        "mesh_units": "mm",
+                        "grid_units_per_cm": float(getattr(getattr(self, "canvas", None), "grid_units_per_cm", 10.0) or 10.0),
+                    },
                     "links": [],
                     "joints": [],
                     "ui_state": {
@@ -47,6 +54,20 @@ class ProjectMixin:
                     },
                     "joint_relations": {}
                 }
+
+                # Derive a human-readable mesh unit label from grid scale (legacy-compatible).
+                try:
+                    units_per_cm = float(robot_data["meta"]["grid_units_per_cm"])
+                    if abs(units_per_cm - 10.0) < 1e-9:
+                        robot_data["meta"]["mesh_units"] = "mm"
+                    elif abs(units_per_cm - 1.0) < 1e-9:
+                        robot_data["meta"]["mesh_units"] = "cm"
+                    elif abs(units_per_cm - 0.01) < 1e-12:
+                        robot_data["meta"]["mesh_units"] = "m"
+                    else:
+                        robot_data["meta"]["mesh_units"] = "custom"
+                except Exception:
+                    robot_data["meta"]["mesh_units"] = "unknown"
 
                 # 1. Gather Links
                 for name, link in self.robot.links.items():
@@ -80,6 +101,7 @@ class ProjectMixin:
                         "max_limit": joint.max_limit,
                         "current_value": joint.current_value,
                         "is_gripper": getattr(joint, "is_gripper", False),
+                        "gripping_surface_touch_only": getattr(joint, "gripping_surface_touch_only", False),
                         "contact_surface_name": getattr(joint, "contact_surface_name", None),
                         "contact_surface_link_name": getattr(joint, "contact_surface_link_name", None),
                         "contact_surface_center_local": (
@@ -232,7 +254,20 @@ class ProjectMixin:
                 with open(json_path, 'r') as f:
                     robot_data = json.load(f)
 
+                # Restore the unit scale used when the project was saved (legacy projects
+                # may have used a non-default grid_units_per_cm to match CAD units).
+                meta = robot_data.get("meta", {}) if isinstance(robot_data, dict) else {}
+                explicit_units_per_cm = meta.get("grid_units_per_cm")
+                if explicit_units_per_cm is not None and hasattr(self, "canvas") and self.canvas is not None:
+                    try:
+                        self.canvas.update_grid_scale(float(explicit_units_per_cm))
+                        self.log(f"[Project] Restored grid scale: {float(explicit_units_per_cm):g} units/cm")
+                    except Exception:
+                        pass
+
                 # 4. Load Links
+                first_actor_name = None
+                inferred_units_per_cm = None
                 for l_data in robot_data["links"]:
                     name = l_data["name"]
                     mesh_rel_path = l_data["mesh_file"]
@@ -243,6 +278,44 @@ class ProjectMixin:
                         continue
 
                     mesh = trimesh.load(mesh_path)
+                    if isinstance(mesh, trimesh.Scene):
+                        self.log(f"Detected assembly/scene for '{name}'. Merging meshes...")
+                        mesh = mesh.to_mesh()
+
+                    if not hasattr(mesh, "vertices") or len(mesh.vertices) == 0:
+                        self.log(f"WARNING: Mesh for {name} has 0 vertices.")
+                        continue
+
+                    # IMPORTANT:
+                    # Do NOT attempt unit auto-detection here. The project (.trn) stores meshes
+                    # exported from a previous ToRoTRoN session and should be loaded "as-is"
+                    # to preserve exact geometry/scale.
+                    #
+                    # However, older projects did not store the canvas scale and relied on
+                    # auto-detected grid scaling. If the project has no explicit scale metadata,
+                    # infer it once from the first mesh and restore that scale so the assembly
+                    # appears exactly as it did when saved.
+                    if (
+                        explicit_units_per_cm is None
+                        and inferred_units_per_cm is None
+                        and hasattr(self, "canvas")
+                        and self.canvas is not None
+                    ):
+                        try:
+                            bounds = mesh.bounds
+                            raw_size = bounds[1] - bounds[0]
+                            max_dim = float(max(raw_size))
+                            if max_dim < 1.0:
+                                inferred_units_per_cm = 0.01  # meters
+                            elif max_dim > 150.0:
+                                inferred_units_per_cm = 10.0  # millimeters
+                            else:
+                                inferred_units_per_cm = 1.0   # centimeters
+                            self.canvas.update_grid_scale(float(inferred_units_per_cm))
+                            self.log(f"[Project] Inferred grid scale: {float(inferred_units_per_cm):g} units/cm")
+                        except Exception:
+                            pass
+
                     link = self.robot.add_link(name, mesh)
                     link.color = l_data.get("color", "lightgray")
                     link.is_base = l_data.get("is_base", False)
@@ -258,6 +331,8 @@ class ProjectMixin:
                     # Add to UI and Canvas
                     self.add_link_item(name)
                     self.canvas.update_link_mesh(name, mesh, link.t_offset, color=link.color)
+                    if first_actor_name is None:
+                        first_actor_name = name
 
                 # 5. Load Joints (Robot Core)
                 for j_data in robot_data["joints"]:
@@ -274,6 +349,7 @@ class ProjectMixin:
                         joint.max_limit = j_data.get("max_limit", 180.0)
                         joint.current_value = j_data.get("current_value", 0.0)
                         joint.is_gripper = j_data.get("is_gripper", False)
+                        joint.gripping_surface_touch_only = j_data.get("gripping_surface_touch_only", False)
                         joint.contact_surface_name = j_data.get("contact_surface_name")
                         joint.contact_surface_link_name = j_data.get("contact_surface_link_name")
                         joint.gripping_surface_name = j_data.get("gripping_surface_name")
@@ -329,6 +405,10 @@ class ProjectMixin:
                         joint = self.robot.joints.get(joint_id)
                         if joint:
                             joint.is_gripper = data.get('is_gripper', joint.is_gripper)
+                            joint.gripping_surface_touch_only = data.get(
+                                'gripping_surface_touch_only',
+                                getattr(joint, 'gripping_surface_touch_only', False)
+                            )
 
                             if joint.contact_surface_name is None:
                                 joint.contact_surface_name = data.get('contact_surface_name')
@@ -478,7 +558,16 @@ class ProjectMixin:
                 self.matrices_tab.refresh_sliders()
                 self.matrices_tab.update_display()
 
-            self.canvas.plotter.reset_camera()
+            # Ensure something is visible immediately after load.
+            try:
+                base_name = self.robot.base_link.name if getattr(self.robot, "base_link", None) is not None else None
+                focus_name = base_name or first_actor_name
+                if focus_name and hasattr(self.canvas, "focus_on_actor"):
+                    self.canvas.focus_on_actor(focus_name)
+                else:
+                    self.canvas.plotter.reset_camera()
+            except Exception:
+                self.canvas.plotter.reset_camera()
             
             self.log(f"Project loaded from: {file_path}")
             QtWidgets.QMessageBox.information(self, "Success", "Project loaded successfully.")

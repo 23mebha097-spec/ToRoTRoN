@@ -3,15 +3,14 @@ from core.robot import Robot
 from ui.panels.align_panel import AlignPanel
 from ui.panels.joint_panel import JointPanel
 from ui.panels.matrices_panel import MatricesPanel
-from ui.panels.program_panel import ProgramPanel
 from ui.panels.gripper_panel import GripperPanel
 from ui.panels.simulation_panel import SimulationPanel
 from core.serial_manager import SerialManager
-from ui.panels.loop_panel import LoopPanel
 import os
+import time
 import numpy as np
 import random
-import traceback
+from pathlib import Path
 from ui.widgets.code_drawer import CodeDrawer
 from core.firmware_gen import generate_esp32_firmware
 
@@ -79,6 +78,42 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
             padding: 5px;
         """)
         top_layout.addWidget(logo_label)
+
+        self.load_btn = QtWidgets.QPushButton()
+        self.load_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_DialogOpenButton))
+        self.load_btn.setToolTip("Open project")
+        self.load_btn.setFixedSize(36, 36)
+        self.load_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.load_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                border: 2px solid #e0e0e0;
+                border-radius: 18px;
+            }
+            QPushButton:hover {
+                border-color: #1976d2;
+            }
+        """)
+        self.load_btn.clicked.connect(self.load_project)
+        top_layout.addWidget(self.load_btn)
+
+        self.save_btn = QtWidgets.QPushButton()
+        self.save_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_DialogSaveButton))
+        self.save_btn.setToolTip("Save project")
+        self.save_btn.setFixedSize(36, 36)
+        self.save_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                border: 2px solid #e0e0e0;
+                border-radius: 18px;
+            }
+            QPushButton:hover {
+                border-color: #1976d2;
+            }
+        """)
+        self.save_btn.clicked.connect(self.save_project)
+        top_layout.addWidget(self.save_btn)
         
         top_layout.addStretch()
         
@@ -120,23 +155,14 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         """)
         refresh_btn.clicked.connect(self.refresh_ports)
         top_layout.addWidget(refresh_btn)
-        
-        top_layout.addSpacing(15)
-        
-        self.save_btn = QtWidgets.QPushButton("Save")
-        self.save_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        self.save_btn.setStyleSheet("font-size: 13px; padding: 8px 18px;")
-        self.save_btn.clicked.connect(self.save_project)
-        top_layout.addWidget(self.save_btn)
-        
-        self.load_btn = QtWidgets.QPushButton("Open")
-        self.load_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        self.load_btn.setStyleSheet("font-size: 13px; padding: 8px 18px;")
-        self.load_btn.clicked.connect(self.load_project)
-        top_layout.addWidget(self.load_btn)
-        
+
         # Simulation toggle button
-        self.sim_toggle_btn = QtWidgets.QPushButton("Simulation Mode")
+        self.sim_toggle_btn = QtWidgets.QPushButton()
+        simulation_icon_path = Path(__file__).resolve().parents[1] / "assets" / "simulation_symbol.svg"
+        self.sim_toggle_btn.setIcon(QtGui.QIcon(str(simulation_icon_path)))
+        self.sim_toggle_btn.setToolTip("Simulation Mode")
+        self.sim_toggle_btn.setFixedSize(40, 40)
+        self.sim_toggle_btn.setIconSize(QtCore.QSize(24, 24))
         self.sim_toggle_btn.setCheckable(True)
         self.sim_toggle_btn.setChecked(False)
         self.sim_toggle_btn.setStyleSheet("""
@@ -146,7 +172,7 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
                 border: 1px solid #bbb;
                 border-radius: 8px;
                 font-weight: bold;
-                padding: 8px 15px;
+                padding: 0px;
             }
             QPushButton:checked {
                 background-color: #4CAF50;
@@ -184,9 +210,7 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
             ("Align", "Align components together"),
             ("Joint", "Create and control joints"),
             ("Matrices", "View transformation matrices"),
-            ("Code", "Program robot movements"),
             ("Gripper", "Control and calibrate robotic grippers"),
-            ("Loop", "Record and loop joint movements")
         ]
         
         # Ensure panel_stack is initialized before buttons are connected
@@ -200,18 +224,14 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
         self.align_tab = AlignPanel(self)
         self.joint_tab = JointPanel(self)
         self.matrices_tab = MatricesPanel(self)
-        self.program_tab = ProgramPanel(self)
         self.gripper_tab = GripperPanel(self)
-        self.loop_tab = LoopPanel(self)
         self.simulation_tab = SimulationPanel(self)
         
         self.panel_stack.addWidget(self.links_tab)
         self.panel_stack.addWidget(self.align_tab)
         self.panel_stack.addWidget(self.joint_tab)
         self.panel_stack.addWidget(self.matrices_tab)
-        self.panel_stack.addWidget(self.program_tab)
         self.panel_stack.addWidget(self.gripper_tab)
-        self.panel_stack.addWidget(self.loop_tab)
         self.panel_stack.addWidget(self.simulation_tab)
         
         for name, tooltip in nav_items:
@@ -519,86 +539,10 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
                     background-color: #c8e6c9;
                 }
             """)
-            self.gripper_surface_btn.clicked.connect(self.joint_tab.on_select_gripper_surface)
+            self.gripper_surface_btn.clicked.connect(self.joint_tab.on_select_gripper_surface_only)
             self.gripper_surface_btn.setVisible(False)  # Only visible in Joint Mode
 
-            # --- Home Position XYZ Input (bottom-right of canvas, above Home btn) ---
-            self.home_xyz_widget = QtWidgets.QWidget(self.canvas)
-            self.home_xyz_widget.setFixedSize(200, 40)
-            self.home_xyz_widget.setStyleSheet("""
-                QWidget {
-                    background-color: rgba(255, 255, 255, 220);
-                    border: 2px solid #1565c0;
-                    border-radius: 8px;
-                }
-            """)
-            xyz_layout = QtWidgets.QHBoxLayout(self.home_xyz_widget)
-            xyz_layout.setContentsMargins(6, 4, 6, 4)
-            xyz_layout.setSpacing(4)
-
-            spin_style = """
-                QDoubleSpinBox {
-                    background: white;
-                    color: #212121;
-                    border: 1px solid #bbb;
-                    border-radius: 3px;
-                    padding: 2px;
-                    font-size: 11px;
-                    font-weight: bold;
-                }
-            """
-
-            self.home_x_spin = QtWidgets.QDoubleSpinBox()
-            self.home_x_spin.setRange(-9999, 9999)
-            self.home_x_spin.setValue(0)
-            self.home_x_spin.setPrefix("X:")
-            self.home_x_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
-            self.home_x_spin.setFixedWidth(58)
-            self.home_x_spin.setStyleSheet(spin_style)
-            xyz_layout.addWidget(self.home_x_spin)
-
-            self.home_y_spin = QtWidgets.QDoubleSpinBox()
-            self.home_y_spin.setRange(-9999, 9999)
-            self.home_y_spin.setValue(0)
-            self.home_y_spin.setPrefix("Y:")
-            self.home_y_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
-            self.home_y_spin.setFixedWidth(58)
-            self.home_y_spin.setStyleSheet(spin_style)
-            xyz_layout.addWidget(self.home_y_spin)
-
-            self.home_z_spin = QtWidgets.QDoubleSpinBox()
-            self.home_z_spin.setRange(-9999, 9999)
-            self.home_z_spin.setValue(0)
-            self.home_z_spin.setPrefix("Z:")
-            self.home_z_spin.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
-            self.home_z_spin.setFixedWidth(58)
-            self.home_z_spin.setStyleSheet(spin_style)
-            xyz_layout.addWidget(self.home_z_spin)
-
-            # --- Global Home Position Button (bottom-right of canvas) ---
-            self.home_btn = QtWidgets.QPushButton("🏠 Home", self.canvas)
-            self.home_btn.setToolTip("Move robot to Home position")
-            self.home_btn.setFixedSize(100, 40)
-            self.home_btn.setCursor(QtCore.Qt.PointingHandCursor)
-            self.home_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #1976d2;
-                    color: white;
-                    border: 2px solid #1565c0;
-                    border-radius: 8px;
-                    font-weight: bold;
-                    font-size: 13px;
-                    padding: 5px;
-                }
-                QPushButton:hover {
-                    background-color: #1565c0;
-                    border-color: #0d47a1;
-                }
-                QPushButton:pressed {
-                    background-color: #0d47a1;
-                }
-            """)
-            self.home_btn.clicked.connect(self.go_home)
+            self.home_position = (0.0, 0.0, 0.0)
 
             original_resize = self.canvas.resizeEvent
 
@@ -621,16 +565,15 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
                 if hasattr(self, 'gripper_surface_btn') and self.gripper_surface_btn:
                     self.gripper_surface_btn.move(self.canvas.width() - 180, self.canvas.height() - 60)
                 
-                if hasattr(self, 'home_xyz_widget') and self.home_xyz_widget:
-                    self.home_xyz_widget.move(self.canvas.width() - 220, self.canvas.height() - 110)
-                
-                if hasattr(self, 'home_btn') and self.home_btn:
-                    self.home_btn.move(self.canvas.width() - 120, self.canvas.height() - 60)
-
             self.canvas.resizeEvent = patched_resize
 
             self.canvas.on_drop_callback = self.sync_link_transform
             self.canvas.on_deselect_callback = self.on_deselect
+
+            # Global shortcut so Home works from any panel / mode.
+            self.home_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence("Ctrl+H"), self)
+            self.home_shortcut.setContext(QtCore.Qt.ApplicationShortcut)
+            self.home_shortcut.activated.connect(self.go_home)
         except Exception:
             self._left_container.setEnabled(False)
             self._set_canvas_error("Failed to initialize 3D engine.", traceback.format_exc())
@@ -638,32 +581,298 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
     # ------------------------------------------------------------------
     # Global Home Position
     # ------------------------------------------------------------------
-    def go_home(self):
+    def _resolve_home_tcp_link(self):
+        """Resolve the TCP link used for Home navigation."""
+        tcp_link = None
+        if hasattr(self, 'simulation_tab') and hasattr(self.simulation_tab, '_get_tcp_link'):
+            tcp_link = self.simulation_tab._get_tcp_link()
+
+        if not tcp_link:
+            for link in self.robot.links.values():
+                if link.parent_joint and not link.child_joints:
+                    tcp_link = link
+                    break
+
+        return tcp_link
+
+    def apply_home_from_fields(self):
+        """Set Home XYZ from the fields, rejecting unreachable targets by default."""
+        try:
+            x = float(self.home_x_spin.value())
+            y = float(self.home_y_spin.value())
+            z = float(self.home_z_spin.value())
+
+            tcp_link = self._resolve_home_tcp_link()
+            if not tcp_link:
+                # No arm loaded yet; allow storing values for later.
+                self.set_home_coordinates(x, y, z, log_change=True)
+                return
+
+            _, local_tool_pt, _ = self.get_link_tool_point(tcp_link)
+            ratio = self.canvas.grid_units_per_cm if hasattr(self, "canvas") and self.canvas is not None else 10.0
+            target_world = np.array([x * ratio, y * ratio, z * ratio], dtype=float)
+
+            modifiers = QtWidgets.QApplication.keyboardModifiers()
+            force_save = bool(modifiers & QtCore.Qt.ShiftModifier)
+            if not force_save and not self._ik_reachable(target_world, tcp_link, local_tool_pt):
+                self.log(
+                    f"[Home] Update rejected: XYZ unreachable "
+                    f"(hold Shift while clicking Update to save anyway)."
+                )
+                self.show_toast("Home XYZ unreachable", "warning")
+                return
+
+            self.set_home_coordinates(x, y, z, log_change=True)
+        except Exception as e:
+            self.log(f"[Home] Update failed: {e}")
+            self.show_toast("Home Update Failed", "error")
+
+    def set_home_to_current_tool(self):
+        """Set Home XYZ to the current tool (live point) position."""
+        try:
+            tcp_link = self._resolve_home_tcp_link()
+            if not tcp_link:
+                self.log("[Home] Error: No robot arm detected (link with joint needed).")
+                self.show_toast("No robot arm detected", "warning")
+                return
+
+            pos_world, _, _ = self.get_link_tool_point(tcp_link)
+            ratio = self.canvas.grid_units_per_cm if hasattr(self, "canvas") and self.canvas is not None else 10.0
+            pos_cm = np.array(pos_world, dtype=float) / ratio
+            self.set_home_coordinates(pos_cm[0], pos_cm[1], pos_cm[2], log_change=True)
+            self.show_toast("Home set to current tool position", "success")
+        except Exception as e:
+            self.log(f"[Home] Set Here failed: {e}")
+            self.show_toast("Set Home Failed", "error")
+
+    def get_home_coordinates(self):
+        """Return the current Home coordinates in centimeters."""
+        if hasattr(self, "home_x") and hasattr(self, "home_y") and hasattr(self, "home_z"):
+            return (
+                float(self.home_x.value()),
+                float(self.home_y.value()),
+                float(self.home_z.value()),
+            )
+        if hasattr(self, "home_x_spin") and hasattr(self, "home_y_spin") and hasattr(self, "home_z_spin"):
+            return (
+                float(self.home_x_spin.value()),
+                float(self.home_y_spin.value()),
+                float(self.home_z_spin.value()),
+            )
+        return (0.0, 0.0, 0.0)
+
+    def set_home_coordinates(self, x, y, z, *, log_change=False):
+        """Synchronize the canonical Home coordinates across every visible editor."""
+        coords = (float(x), float(y), float(z))
+        for names in (
+            ("home_x", "home_y", "home_z"),
+            ("home_x_spin", "home_y_spin", "home_z_spin"),
+        ):
+            widgets = [getattr(self, name, None) for name in names]
+            if not all(widgets):
+                continue
+            for widget, value in zip(widgets, coords):
+                widget.blockSignals(True)
+                widget.setValue(value)
+                widget.blockSignals(False)
+
+        self.home_position = coords
+        if log_change:
+            self.log(f"[Home] Coordinates set to X={coords[0]:.2f}, Y={coords[1]:.2f}, Z={coords[2]:.2f} cm")
+
+    def _move_robot_to_world_balanced(self, tcp_link, target_world, tool_local, *, speed_pct=None, label="Home"):
+        """Move through a safe lift -> travel -> descend path using IK + FK updates."""
+        if tcp_link is None:
+            return False
+
+        ratio = self.canvas.grid_units_per_cm if hasattr(self, "canvas") and self.canvas is not None else 10.0
+        speed_pct = float(getattr(self, "current_speed", 50) if speed_pct is None else speed_pct)
+        speed_pct = max(20.0, min(speed_pct, 60.0))
+
+        start_world, _, _ = self.get_link_tool_point(tcp_link)
+        start_cm = np.array(start_world, dtype=float) / ratio
+        target_cm = np.array(target_world, dtype=float) / ratio
+
+        # Try the exact Home target first. In many layouts this is already reachable
+        # and avoids over-lifting the arm into an unreachable posture.
+        direct_target = target_cm * ratio
+        if self._animate_ik_waypoint(
+            direct_target,
+            tcp_link,
+            tool_local,
+            speed_pct=speed_pct,
+            label=f"{label} direct",
+        ):
+            return True
+
+        # If the direct solve fails, retry with a few gentler lift heights.
+        # Keeping the lift modest prevents the "safe" path from exceeding workspace limits.
+        xy_span_cm = float(np.linalg.norm(target_cm[:2] - start_cm[:2]))
+        z_span_cm = float(abs(target_cm[2] - start_cm[2]))
+        base_lift_cm = max(2.0, min(6.0, 0.12 * xy_span_cm + 0.08 * z_span_cm))
+        lift_candidates = [
+            base_lift_cm,
+            min(6.0, base_lift_cm + 1.5),
+            min(8.0, base_lift_cm + 3.0),
+        ]
+
+        for attempt_idx, safe_lift_cm in enumerate(lift_candidates, start=1):
+            safe_z_cm = max(start_cm[2], target_cm[2]) + safe_lift_cm
+            waypoints_cm = [
+                np.array([start_cm[0], start_cm[1], safe_z_cm], dtype=float),
+                np.array([target_cm[0], target_cm[1], safe_z_cm], dtype=float),
+                np.array([target_cm[0], target_cm[1], target_cm[2]], dtype=float),
+            ]
+
+            ok = True
+            for idx, waypoint_cm in enumerate(waypoints_cm, start=1):
+                waypoint_world = waypoint_cm * ratio
+                if not self._animate_ik_waypoint(
+                    waypoint_world,
+                    tcp_link,
+                    tool_local,
+                    speed_pct=speed_pct,
+                    label=f"{label} attempt {attempt_idx} step {idx}/{len(waypoints_cm)}",
+                ):
+                    ok = False
+                    break
+
+            if ok:
+                return True
+
+        return False
+
+    def _ik_reachable(self, target_world, tcp_link, tool_local, *, max_iters=900):
+        """Check reachability without animating or leaving joint state modified."""
+        if tcp_link is None:
+            return False
+
+        ratio = self.canvas.grid_units_per_cm if hasattr(self, "canvas") and self.canvas is not None else 10.0
+        start_vals = {n: j.current_value for n, j in self.robot.joints.items()}
+        try:
+            reached = self.robot.inverse_kinematics(
+                target_world,
+                tcp_link,
+                max_iters=max_iters,
+                tolerance=0.5 * ratio,
+                tool_offset=tool_local,
+            )
+        finally:
+            for n, v in start_vals.items():
+                if n in self.robot.joints:
+                    self.robot.joints[n].current_value = v
+            self.robot.update_kinematics()
+            if hasattr(self, "canvas") and self.canvas is not None:
+                self.canvas.update_transforms(self.robot)
+
+        return bool(reached)
+
+    def _clamp_world_target_to_reachable(self, start_world, target_world, tcp_link, tool_local):
         """
-        Move the robot's live point to the global Home position
-        defined by the XYZ inputs on the canvas.
+        If the exact target is unreachable, binary-search the furthest reachable
+        point along the line segment from start_world -> target_world.
+        """
+        start_world = np.array(start_world, dtype=float)
+        target_world = np.array(target_world, dtype=float)
+
+        if self._ik_reachable(target_world, tcp_link, tool_local):
+            return target_world
+
+        lo = 0.0
+        hi = 1.0
+        for _ in range(14):
+            mid = (lo + hi) / 2.0
+            cand = start_world + (target_world - start_world) * mid
+            if self._ik_reachable(cand, tcp_link, tool_local, max_iters=220):
+                lo = mid
+            else:
+                hi = mid
+
+        return start_world + (target_world - start_world) * lo
+
+    def _animate_ik_waypoint(self, target_world, tcp_link, tool_local, *, speed_pct=50.0, label="Target"):
+        """Solve IK for one waypoint, then animate the FK transition smoothly."""
+        if tcp_link is None:
+            return False
+
+        ratio = self.canvas.grid_units_per_cm if hasattr(self, "canvas") and self.canvas is not None else 10.0
+        start_vals = {n: j.current_value for n, j in self.robot.joints.items()}
+
+        reached = self.robot.inverse_kinematics(
+            target_world,
+            tcp_link,
+            max_iters=350,
+            tolerance=0.5 * ratio,
+            tool_offset=tool_local,
+        )
+        if not reached:
+            for n, v in start_vals.items():
+                if n in self.robot.joints:
+                    self.robot.joints[n].current_value = v
+            self.robot.update_kinematics()
+            if hasattr(self, "canvas") and self.canvas is not None:
+                self.canvas.update_transforms(self.robot)
+            self.log(f"[Home] {label} is unreachable.")
+            return False
+
+        target_vals = {n: j.current_value for n, j in self.robot.joints.items()}
+        for n, v in start_vals.items():
+            if n in self.robot.joints:
+                self.robot.joints[n].current_value = v
+        self.robot.update_kinematics()
+        if hasattr(self, "canvas") and self.canvas is not None:
+            self.canvas.update_transforms(self.robot)
+
+        max_diff = 0.0
+        for n, v0 in start_vals.items():
+            v1 = target_vals.get(n, v0)
+            max_diff = max(max_diff, abs(v1 - v0))
+
+        steps = int(max(8, min(60, max_diff / max(1.0, (101.0 - speed_pct) / 8.0)))) if max_diff > 0.01 else 1
+        step_delay = 0.035 if speed_pct >= 45 else 0.05
+        if speed_pct < 30:
+            step_delay = 0.06
+
+        if hasattr(self, "serial_mgr") and self.serial_mgr.is_connected:
+            for name, value in target_vals.items():
+                try:
+                    self.serial_mgr.send_command(name, float(value), speed=speed_pct)
+                except Exception:
+                    pass
+
+        for i in range(1, steps + 1):
+            a = i / steps
+            for n, v0 in start_vals.items():
+                j = self.robot.joints.get(n)
+                if j is None:
+                    continue
+                v1 = target_vals.get(n, v0)
+                j.current_value = v0 + (v1 - v0) * a
+
+            self.robot.update_kinematics()
+            if hasattr(self, "canvas") and self.canvas is not None:
+                self.canvas.update_transforms(self.robot)
+            self.update_live_ui()
+            QtWidgets.QApplication.processEvents()
+            time.sleep(step_delay)
+
+        return True
+
+    def go_home(self, *args):
+        """
+        Move the robot's live point to the configured Home position.
         """
         try:
-            x = self.home_x_spin.value()
-            y = self.home_y_spin.value()
-            z = self.home_z_spin.value()
-            
-            ratio = self.canvas.grid_units_per_cm
+            x, y, z = self.get_home_coordinates()
+            self.set_home_coordinates(x, y, z)
+
+            ratio = self.canvas.grid_units_per_cm if hasattr(self, "canvas") and self.canvas is not None else 10.0
             target_world = np.array([x * ratio, y * ratio, z * ratio])
             
             self.log(f"[Home] Navigating live point to: X={x:.2f}, Y={y:.2f}, Z={z:.2f}...")
 
             # 1. Identify TCP (Tool Center Point) Link
-            tcp_link = None
-            if hasattr(self, 'simulation_tab') and hasattr(self.simulation_tab, '_get_tcp_link'):
-                tcp_link = self.simulation_tab._get_tcp_link()
-            
-            if not tcp_link:
-                # Fallback search for a leaf link
-                for link in self.robot.links.values():
-                    if link.parent_joint and not link.child_joints:
-                        tcp_link = link
-                        break
+            tcp_link = self._resolve_home_tcp_link()
             
             if not tcp_link:
                 self.log("[Home] Error: No robot arm detected (link with joint needed).")
@@ -672,18 +881,28 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
             # 2. Get local tool offset (fingertip midpoint or custom offset)
             _, local_tool_pt, _ = self.get_link_tool_point(tcp_link)
             
-            # 3. Solve Inverse Kinematics
-            success = self.robot.inverse_kinematics(
-                target_pos=target_world,
-                tcp_link=tcp_link,
-                tool_offset=local_tool_pt,
-                tolerance=0.1
+            # 3. Move through a balanced IK/FK path: lift -> travel -> descend.
+            success = self._move_robot_to_world_balanced(
+                tcp_link,
+                target_world,
+                local_tool_pt,
+                speed_pct=getattr(self, "current_speed", 50),
+                label="Home",
             )
 
             if success:
                 self.log(f"✅ [Home] Successfully moved to Home position.")
+
+                if hasattr(self, "serial_mgr") and self.serial_mgr.is_connected:
+                    home_speed = max(float(getattr(self, "current_speed", 50)), 80.0)
+                    try:
+                        self.serial_mgr.sync_all_to_hardware(speed=home_speed)
+                    except Exception as sync_err:
+                        self.log(f"[Home] Hardware sync failed: {sync_err}")
+
                 # 4. Global UI Refresh
-                self.canvas.plotter.render()
+                if hasattr(self, "canvas") and self.canvas is not None:
+                    self.canvas.plotter.render()
                 
                 # Refresh all active tabs safely
                 tabs = [
@@ -701,17 +920,71 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
 
                 self.update_live_ui()  # Syncs the "LP" row
                     
-                # Sync into Simulation Panel's hidden home coords if they exist
-                if hasattr(self, 'simulation_tab'):
-                    sim = self.simulation_tab
-                    for coord, val in [('home_x', x), ('home_y', y), ('home_z', z)]:
-                        if hasattr(sim, coord):
-                            sb = getattr(sim, coord)
-                            if hasattr(sb, 'setValue'):
-                                sb.blockSignals(True)
-                                sb.setValue(val)
-                                sb.blockSignals(False)
             else:
+                modifiers = QtWidgets.QApplication.keyboardModifiers()
+                allow_nearest = bool(modifiers & QtCore.Qt.ShiftModifier)
+
+                # Exact Home is required unless user explicitly requests nearest reachable.
+                if not allow_nearest:
+                    self.log("[Home] Warning: Could not reach Home position (Out of workspace).")
+                    self.show_toast("Home Position Unreachable", "warning")
+                    return
+
+                # Clamp the Home target to the nearest reachable point so Home
+                # doesn't "always fail" when the stored XYZ is out-of-workspace.
+                start_world, _, _ = self.get_link_tool_point(tcp_link)
+                clamped_world = self._clamp_world_target_to_reachable(
+                    start_world,
+                    target_world,
+                    tcp_link,
+                    local_tool_pt,
+                )
+
+                if clamped_world is not None and np.linalg.norm(np.array(clamped_world) - target_world) > 1e-9:
+                    ratio = self.canvas.grid_units_per_cm if hasattr(self, "canvas") and self.canvas is not None else 10.0
+                    clamped_cm = np.array(clamped_world, dtype=float) / ratio
+                    self.log(
+                        f"[Home] Home target unreachable; clamping to reachable point: "
+                        f"X={clamped_cm[0]:.2f}, Y={clamped_cm[1]:.2f}, Z={clamped_cm[2]:.2f} cm"
+                    )
+
+                    clamped_ok = self._move_robot_to_world_balanced(
+                        tcp_link,
+                        clamped_world,
+                        local_tool_pt,
+                        speed_pct=getattr(self, "current_speed", 50),
+                        label="Home (clamped)",
+                    )
+                    if clamped_ok:
+                        self.show_toast("Moved to nearest reachable point (Home unchanged)", "info")
+                        self.log("[Home] Moved to nearest reachable point.")
+
+                        if hasattr(self, "serial_mgr") and self.serial_mgr.is_connected:
+                            home_speed = max(float(getattr(self, "current_speed", 50)), 80.0)
+                            try:
+                                self.serial_mgr.sync_all_to_hardware(speed=home_speed)
+                            except Exception as sync_err:
+                                self.log(f"[Home] Hardware sync failed: {sync_err}")
+
+                        if hasattr(self, "canvas") and self.canvas is not None:
+                            self.canvas.plotter.render()
+
+                        tabs = [
+                            ("joint_tab", "Joint"),
+                            ("simulation_tab", "Simulation"),
+                            ("gripper_tab", "Gripper"),
+                        ]
+                        for attr, name in tabs:
+                            tab = getattr(self, attr, None)
+                            if tab and hasattr(tab, "refresh_joints"):
+                                try:
+                                    tab.refresh_joints()
+                                except Exception as e:
+                                    print(f"Error refreshing {name} tab: {e}")
+
+                        self.update_live_ui()
+                        return
+
                 self.log(f"⚠️ [Home] Warning: Could not reach Home position (Out of workspace).")
                 self.show_toast("Home Position Unreachable", "warning")
 
@@ -720,8 +993,64 @@ class MainWindow(QtWidgets.QMainWindow, LinksMixin, HardwareMixin, ProjectMixin,
             traceback.print_exc()
             self.show_toast("Home Command Failed", "error")
 
-        self.home_position = (x, y, z)
+    def _start_joint_animation(self, joint_ids, child_names, targets):
+        if not joint_ids:
+            return
 
+        for joint_id, target in zip(joint_ids, targets):
+            joint = self.robot.joints.get(joint_id)
+            if joint is not None:
+                joint.current_value = float(target)
+
+        self.robot.update_kinematics()
+        if hasattr(self, "canvas") and self.canvas is not None:
+            self.canvas.update_transforms(self.robot)
+
+        if hasattr(self, "joint_tab"):
+            for child_name, target in zip(child_names, targets):
+                try:
+                    self.joint_tab.apply_joint_rotation(child_name, float(target))
+                except Exception:
+                    pass
+
+        if hasattr(self, "matrices_tab"):
+            for child_name, target in zip(child_names, targets):
+                try:
+                    self.matrices_tab.sync_slider(child_name, float(target))
+                except Exception:
+                    pass
+
+        if hasattr(self, "simulation_tab") and hasattr(self.simulation_tab, "update_display"):
+            try:
+                self.simulation_tab.update_display()
+            except Exception:
+                pass
+
+        self.update_live_ui()
+
+    def _move_tcp_to_xyz(self, x, y, z, tcp_link):
+        if tcp_link is None:
+            return False
+
+        ratio = self.canvas.grid_units_per_cm if hasattr(self, "canvas") and self.canvas is not None else 10.0
+        target_world = np.array([x * ratio, y * ratio, z * ratio], dtype=float)
+        try:
+            _, tool_local, _ = self.get_link_tool_point(tcp_link, return_vec=True)
+            reached = self.robot.inverse_kinematics(
+                target_world,
+                tcp_link,
+                max_iters=300,
+                tolerance=0.5 * ratio,
+                tool_offset=tool_local,
+            )
+            self.robot.update_kinematics()
+            if hasattr(self, "canvas") and self.canvas is not None:
+                self.canvas.update_transforms(self.robot)
+            self.update_live_ui()
+            return bool(reached)
+        except Exception:
+            traceback.print_exc()
+            return False
 
 if __name__ == "__main__":
     import sys

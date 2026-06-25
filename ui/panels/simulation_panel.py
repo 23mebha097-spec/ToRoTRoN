@@ -2,6 +2,8 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 import json
 import numpy as np
 import traceback
+from ui.panels.program_panel import ProgramPanel
+from ui.panels.ik_fk_panel import IKFKPanel
 
 
 class TypeOnlyDoubleSpinBox(QtWidgets.QDoubleSpinBox):
@@ -38,21 +40,18 @@ class SimulationPanel(QtWidgets.QWidget):
         
         self.joints_btn = self.create_tab_button("Joints", "assets/panel.png")
         self.matrices_btn = self.create_tab_button("Matrices", "assets/matrices.png")
-        self.objects_btn = self.create_tab_button("Objects", "assets/simulation.png")
-        self.welding_btn = self.create_tab_button("Welding", "assets/simulation.png")
-        self.painting_btn = self.create_tab_button("Painting", "assets/simulation.png")
+        self.code_btn = self.create_tab_button("Code", "assets/panel.png")
+        self.ik_fk_btn = self.create_tab_button("IK/FK", "assets/panel.png")
 
         self.joints_btn.clicked.connect(lambda: self.switch_view(0))
         self.matrices_btn.clicked.connect(lambda: self.switch_view(1))
-        self.objects_btn.clicked.connect(lambda: self.switch_view(2))
-        self.welding_btn.clicked.connect(lambda: self.switch_view(3))
-        self.painting_btn.clicked.connect(lambda: self.switch_view(4))
+        self.code_btn.clicked.connect(lambda: self.switch_view(2))
+        self.ik_fk_btn.clicked.connect(lambda: self.switch_view(3))
         
         tab_layout.addWidget(self.joints_btn)
         tab_layout.addWidget(self.matrices_btn)
-        tab_layout.addWidget(self.objects_btn)
-        tab_layout.addWidget(self.welding_btn)
-        tab_layout.addWidget(self.painting_btn)
+        tab_layout.addWidget(self.code_btn)
+        tab_layout.addWidget(self.ik_fk_btn)
         self.layout.addLayout(tab_layout)
         
         # --- STACKED VIEW ---
@@ -95,7 +94,15 @@ class SimulationPanel(QtWidgets.QWidget):
         self.matrices_layout.addWidget(scroll_matrices)
         self.stack.addWidget(self.matrices_view)
 
-        # 3. Simulation Objects View (Consolidated from floating panel)
+        # 3. Code View
+        self.code_view = ProgramPanel(self.main_window)
+        self.stack.addWidget(self.code_view)
+
+        # 4. IK/FK View
+        self.ik_fk_view = IKFKPanel(self.main_window)
+        self.stack.addWidget(self.ik_fk_view)
+
+        # 5. Simulation Objects View (Consolidated from floating panel)
         self.objects_view = QtWidgets.QWidget()
         self.objects_layout = QtWidgets.QVBoxLayout(self.objects_view)
         self.objects_layout.setContentsMargins(0, 5, 0, 0)
@@ -263,6 +270,65 @@ class SimulationPanel(QtWidgets.QWidget):
         """)
         self.set_lp_btn.clicked.connect(self.set_custom_lp)
         prop_vbox.addWidget(self.set_lp_btn)
+
+        action_row = QtWidgets.QHBoxLayout()
+        action_row.setSpacing(6)
+
+        self.make_robo_btn = QtWidgets.QPushButton("Make Robo")
+        self.make_robo_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.make_robo_btn.setToolTip("Promote the selected simulation object to the robot base")
+        self.make_robo_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1976d2;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 10px;
+            }
+            QPushButton:hover { background-color: #1565c0; }
+        """)
+        self.make_robo_btn.clicked.connect(self.make_robo_from_selected_object)
+        action_row.addWidget(self.make_robo_btn)
+
+        self.visible_btn = QtWidgets.QPushButton("Visible")
+        self.visible_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.visible_btn.setToolTip("Show the selected simulation object in 3D")
+        self.visible_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2e7d32;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 10px;
+            }
+            QPushButton:hover { background-color: #1b5e20; }
+        """)
+        self.visible_btn.clicked.connect(lambda: self.set_selected_sim_object_visible(True))
+        action_row.addWidget(self.visible_btn)
+
+        self.hidden_btn = QtWidgets.QPushButton("Hidden")
+        self.hidden_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.hidden_btn.setToolTip("Hide the selected simulation object in 3D")
+        self.hidden_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #c62828;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 6px 10px;
+            }
+            QPushButton:hover { background-color: #b71c1c; }
+        """)
+        self.hidden_btn.clicked.connect(lambda: self.set_selected_sim_object_visible(False))
+        action_row.addWidget(self.hidden_btn)
+
+        prop_vbox.addLayout(action_row)
         
         self.objects_layout.addWidget(self.prop_group)
 
@@ -302,33 +368,62 @@ class SimulationPanel(QtWidgets.QWidget):
         points_grid.addWidget(self.place_y, 1, 2)
         points_grid.addWidget(self.place_z, 1, 3)
 
-        # HOME Row
-        home_lbl = QtWidgets.QLabel("HOME")
-        home_lbl.setStyleSheet("font-weight: bold; color: #455A64; font-size: 13px;")
-        home_lbl.setToolTip("Home position reached after the pick-and-place cycle completes")
-        self.home_x = self.create_coord_sb("#455A64", save_on_change=False)
-        self.home_y = self.create_coord_sb("#455A64", save_on_change=False)
-        self.home_z = self.create_coord_sb("#455A64", save_on_change=False)
+        # HOME coordinates are shared with the main window and persisted across modes.
+        if not hasattr(self.main_window, "home_x_spin"):
+            self.main_window.home_x_spin = self.create_coord_sb("#455A64", save_on_change=False)
+            self.main_window.home_y_spin = self.create_coord_sb("#455A64", save_on_change=False)
+            self.main_window.home_z_spin = self.create_coord_sb("#455A64", save_on_change=False)
+            self.main_window.home_x_spin.setVisible(False)
+            self.main_window.home_y_spin.setVisible(False)
+            self.main_window.home_z_spin.setVisible(False)
 
-        # HOME row hidden from UI but kept for internal use
-        home_lbl.setVisible(False)
-        self.home_x.setVisible(False)
-        self.home_y.setVisible(False)
-        self.home_z.setVisible(False)
+        self.home_x = self.main_window.home_x_spin
+        self.home_y = self.main_window.home_y_spin
+        self.home_z = self.main_window.home_z_spin
+        self.main_window.home_x = self.home_x
+        self.main_window.home_y = self.home_y
+        self.main_window.home_z = self.home_z
+        self.home_coord_widgets = [self.home_x, self.home_y, self.home_z]
 
         # LP Row
-        lp_lbl = QtWidgets.QLabel("LP")
-        lp_lbl.setStyleSheet("font-weight: bold; color: #D32F2F; font-size: 13px;")
+        self.live_lbl = QtWidgets.QLabel("LP")
+        self.live_lbl.setStyleSheet("font-weight: bold; color: #D32F2F; font-size: 13px;")
         self.live_x = self.create_coord_sb("#D32F2F")
         self.live_y = self.create_coord_sb("#D32F2F")
         self.live_z = self.create_coord_sb("#D32F2F")
         for sb in [self.live_x, self.live_y, self.live_z]:
             sb.setReadOnly(True)
 
-        points_grid.addWidget(lp_lbl, 3, 0)
+        points_grid.addWidget(self.live_lbl, 3, 0)
         points_grid.addWidget(self.live_x, 3, 1)
         points_grid.addWidget(self.live_y, 3, 2)
         points_grid.addWidget(self.live_z, 3, 3)
+        self.live_coord_widgets = [self.live_x, self.live_y, self.live_z]
+
+        self.coord_toggle_row = QtWidgets.QHBoxLayout()
+        self.coord_toggle_row.setSpacing(6)
+
+        self.home_visible_btn = QtWidgets.QPushButton("Home TCP Visible")
+        self.home_visible_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.home_visible_btn.clicked.connect(lambda: self.set_home_coordinates_visible(True))
+        self.coord_toggle_row.addWidget(self.home_visible_btn)
+
+        self.home_hidden_btn = QtWidgets.QPushButton("Home TCP Hidden")
+        self.home_hidden_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.home_hidden_btn.clicked.connect(lambda: self.set_home_coordinates_visible(False))
+        self.coord_toggle_row.addWidget(self.home_hidden_btn)
+
+        self.live_visible_btn = QtWidgets.QPushButton("Live Point Visible")
+        self.live_visible_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.live_visible_btn.clicked.connect(lambda: self.set_live_point_visible(True))
+        self.coord_toggle_row.addWidget(self.live_visible_btn)
+
+        self.live_hidden_btn = QtWidgets.QPushButton("Live Point Hidden")
+        self.live_hidden_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.live_hidden_btn.clicked.connect(lambda: self.set_live_point_visible(False))
+        self.coord_toggle_row.addWidget(self.live_hidden_btn)
+
+        coord_layout.addLayout(self.coord_toggle_row)
 
         # DIM Row (New: Industrial Dimensions)
         dim_lbl = QtWidgets.QLabel("DIM")
@@ -378,9 +473,7 @@ class SimulationPanel(QtWidgets.QWidget):
         self.objects_layout.addWidget(coord_container)
         self.objects_layout.addStretch()
 
-        self.stack.addWidget(self.objects_view)
-
-        # 4. Welding View (Blank â€” logic TBD)
+        # 7. Welding View (Blank â€” logic TBD)
         self.welding_view = QtWidgets.QWidget()
         welding_layout = QtWidgets.QVBoxLayout(self.welding_view)
         welding_layout.setContentsMargins(10, 10, 10, 10)
@@ -447,75 +540,15 @@ class SimulationPanel(QtWidgets.QWidget):
         """)
         welding_layout.addWidget(self.weld_edges_list)
 
-        weld_params_group = QtWidgets.QGroupBox("Weld Path Parameters")
-        weld_params_group.setStyleSheet("""
-            QGroupBox {
-                border: 1px solid #e0e0e0;
-                border-radius: 6px;
-                margin-top: 10px;
-                padding-top: 14px;
-                font-weight: bold;
-                color: #5d4037;
-            }
-        """)
-        weld_params = QtWidgets.QGridLayout(weld_params_group)
-        weld_params.setSpacing(6)
-
-        weld_params.addWidget(QtWidgets.QLabel("Weld Type:"), 0, 0)
-        self.weld_type_combo = QtWidgets.QComboBox()
-        self.weld_type_combo.addItems(["Auto", "Fillet", "Butt", "Lap"])
-        self.weld_type_combo.setStyleSheet("background: white; border: 1px solid #ddd; border-radius: 4px; padding: 3px 6px;")
-        weld_params.addWidget(self.weld_type_combo, 0, 1)
-
-        weld_params.addWidget(QtWidgets.QLabel("Step Size (mm):"), 1, 0)
-        self.weld_step_sb = QtWidgets.QDoubleSpinBox()
-        self.weld_step_sb.setRange(0.5, 100.0)
-        self.weld_step_sb.setValue(5.0)
-        self.weld_step_sb.setSuffix(" mm")
-        self.weld_step_sb.setStyleSheet("background: white; border: 1px solid #ddd; border-radius: 4px; padding: 2px 4px;")
-        weld_params.addWidget(self.weld_step_sb, 1, 1)
-
-        weld_params.addWidget(QtWidgets.QLabel("Offset (mm):"), 2, 0)
-        self.weld_offset_sb = QtWidgets.QDoubleSpinBox()
-        self.weld_offset_sb.setRange(-50.0, 50.0)
-        self.weld_offset_sb.setValue(0.0)
-        self.weld_offset_sb.setSuffix(" mm")
-        self.weld_offset_sb.setStyleSheet("background: white; border: 1px solid #ddd; border-radius: 4px; padding: 2px 4px;")
-        weld_params.addWidget(self.weld_offset_sb, 2, 1)
-
-        weld_params.addWidget(QtWidgets.QLabel("Torch Angle (deg):"), 3, 0)
-        self.weld_torch_angle_sb = QtWidgets.QDoubleSpinBox()
-        self.weld_torch_angle_sb.setRange(0.0, 180.0)
-        self.weld_torch_angle_sb.setValue(45.0)
-        self.weld_torch_angle_sb.setSuffix(" °")
-        self.weld_torch_angle_sb.setStyleSheet("background: white; border: 1px solid #ddd; border-radius: 4px; padding: 2px 4px;")
-        weld_params.addWidget(self.weld_torch_angle_sb, 3, 1)
-
-        weld_params.addWidget(QtWidgets.QLabel("Approach (mm):"), 4, 0)
-        self.weld_approach_sb = QtWidgets.QDoubleSpinBox()
-        self.weld_approach_sb.setRange(0.0, 500.0)
-        self.weld_approach_sb.setValue(25.0)
-        self.weld_approach_sb.setSuffix(" mm")
-        self.weld_approach_sb.setStyleSheet("background: white; border: 1px solid #ddd; border-radius: 4px; padding: 2px 4px;")
-        weld_params.addWidget(self.weld_approach_sb, 4, 1)
-
-        weld_params.addWidget(QtWidgets.QLabel("Retract (mm):"), 5, 0)
-        self.weld_retract_sb = QtWidgets.QDoubleSpinBox()
-        self.weld_retract_sb.setRange(0.0, 500.0)
-        self.weld_retract_sb.setValue(25.0)
-        self.weld_retract_sb.setSuffix(" mm")
-        self.weld_retract_sb.setStyleSheet("background: white; border: 1px solid #ddd; border-radius: 4px; padding: 2px 4px;")
-        weld_params.addWidget(self.weld_retract_sb, 5, 1)
-
-        weld_params.addWidget(QtWidgets.QLabel("Feed (mm/s):"), 6, 0)
-        self.weld_feed_sb = QtWidgets.QDoubleSpinBox()
-        self.weld_feed_sb.setRange(1.0, 500.0)
-        self.weld_feed_sb.setValue(10.0)
-        self.weld_feed_sb.setSuffix(" mm/s")
-        self.weld_feed_sb.setStyleSheet("background: white; border: 1px solid #ddd; border-radius: 4px; padding: 2px 4px;")
-        weld_params.addWidget(self.weld_feed_sb, 6, 1)
-
-        welding_layout.addWidget(weld_params_group)
+        self.weld_settings = {
+            "weld_type": "auto",
+            "step_size_mm": 5.0,
+            "offset_mm": 0.0,
+            "torch_angle_deg": 45.0,
+            "approach_mm": 25.0,
+            "retract_mm": 25.0,
+            "feed_mm_s": 10.0,
+        }
 
         btn_row = QtWidgets.QHBoxLayout()
         clear_weld_btn = QtWidgets.QPushButton("🗑️ Clear Edges")
@@ -570,38 +603,8 @@ class SimulationPanel(QtWidgets.QWidget):
         welding_info.setWordWrap(True)
         welding_layout.addWidget(welding_info)
 
-        self.weld_move_tabs = QtWidgets.QTabWidget()
-        self.weld_move_tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: 1px solid #e0e0e0;
-                border-radius: 6px;
-                background: #fafafa;
-            }
-            QTabBar::tab {
-                background: #f5f5f5;
-                border: 1px solid #ddd;
-                border-bottom: none;
-                border-top-left-radius: 6px;
-                border-top-right-radius: 6px;
-                padding: 5px 14px;
-                font-weight: bold;
-                font-size: 12px;
-                color: #757575;
-                margin-right: 2px;
-            }
-            QTabBar::tab:selected {
-                background: #fafafa;
-                color: #e65100;
-                border-bottom: 2px solid #e65100;
-            }
-        """)
-
-        live_tab = QtWidgets.QWidget()
-        live_layout = QtWidgets.QVBoxLayout(live_tab)
-        live_layout.setContentsMargins(10, 10, 10, 10)
-        live_layout.setSpacing(10)
-
-        live_group = QtWidgets.QGroupBox("Select Live Point")
+        # Contact reference selection (tabs removed for a simpler Welding panel)
+        live_group = QtWidgets.QGroupBox("Select Contact Reference")
         live_group.setStyleSheet("""
             QGroupBox {
                 border: 1px solid #e0e0e0;
@@ -615,7 +618,7 @@ class SimulationPanel(QtWidgets.QWidget):
         live_grid = QtWidgets.QGridLayout(live_group)
         live_grid.setSpacing(6)
 
-        self.weld_live_point_btn = QtWidgets.QPushButton("📍 Pick Weld Live Point")
+        self.weld_live_point_btn = QtWidgets.QPushButton("🎯 Pick Weld Contact Face")
         self.weld_live_point_btn.setFixedHeight(36)
         self.weld_live_point_btn.setCursor(QtCore.Qt.PointingHandCursor)
         self.weld_live_point_btn.setStyleSheet("""
@@ -632,27 +635,21 @@ class SimulationPanel(QtWidgets.QWidget):
         self.weld_live_point_btn.clicked.connect(self._start_weld_live_point_pick)
         live_grid.addWidget(self.weld_live_point_btn, 0, 0, 1, 2)
 
-        self.weld_live_point_label = QtWidgets.QLabel("Weld live point: not selected")
+        self.weld_live_point_label = QtWidgets.QLabel("Weld contact reference: not selected")
         self.weld_live_point_label.setWordWrap(True)
         self.weld_live_point_label.setStyleSheet("color: #424242; font-size: 11px;")
         live_grid.addWidget(self.weld_live_point_label, 1, 0, 1, 2)
 
         live_hint = QtWidgets.QLabel(
-            "Click a point on the weld edge to define where welding starts. Start Welding will follow the edge from that point."
+            "Click a weld face so its center becomes the contact reference. Start Welding will begin from the nearest selected edge."
         )
         live_hint.setWordWrap(True)
         live_hint.setStyleSheet("color: #757575; font-size: 11px; font-style: italic;")
         live_grid.addWidget(live_hint, 2, 0, 1, 2)
 
-        live_layout.addWidget(live_group)
-        live_layout.addStretch()
-        self.weld_move_tabs.addTab(live_tab, "Select Live Point")
+        welding_layout.addWidget(live_group)
 
-        move_tab = QtWidgets.QWidget()
-        move_layout = QtWidgets.QVBoxLayout(move_tab)
-        move_layout.setContentsMargins(10, 10, 10, 10)
-        move_layout.setSpacing(10)
-
+        # Path move controls (tabs removed for a simpler Welding panel)
         move_group = QtWidgets.QGroupBox("Move Object to Position")
         move_group.setStyleSheet("""
             QGroupBox {
@@ -715,14 +712,10 @@ class SimulationPanel(QtWidgets.QWidget):
         move_hint.setStyleSheet("color: #757575; font-size: 11px; font-style: italic;")
         move_grid.addWidget(move_hint, 4, 0, 1, 2)
 
-        move_layout.addWidget(move_group)
-        move_layout.addStretch()
-        self.weld_move_tabs.addTab(move_tab, "Move Path")
-
-        welding_layout.addWidget(self.weld_move_tabs)
+        welding_layout.addWidget(move_group)
 
         welding_layout.addStretch()
-        self.stack.addWidget(self.welding_view)
+        self._sanitize_welding_panel_text()
         
         self.weld_edge_records = []  # Selected weld edges: each item stores link + endpoints + derived metadata
         self.welding_paths = []  # Generated weld path payloads
@@ -736,6 +729,10 @@ class SimulationPanel(QtWidgets.QWidget):
         self.weld_live_trail_actor_name = "weld_live_trail"
         self.weld_live_point_world = None
         self.weld_live_point_link = None
+        self.weld_live_point_edge_key = None
+        self.weld_live_point_source = None
+        self.weld_live_point_normal = None
+        self.weld_contact_face_data = None
         self.weld_live_point_active = False
         self.weld_timer = QtCore.QTimer(self)
         self.weld_timer.timeout.connect(self._weld_tick)
@@ -756,7 +753,7 @@ class SimulationPanel(QtWidgets.QWidget):
         self.paint_area_point_inputs = []
         self.paint_area_joint_targets = []
         
-        # 5. Painting View â€” with sub-tabs
+        # 8. Painting View â€” with sub-tabs
         self.painting_view = QtWidgets.QWidget()
         painting_layout = QtWidgets.QVBoxLayout(self.painting_view)
         painting_layout.setContentsMargins(10, 10, 10, 10)
@@ -1078,7 +1075,7 @@ class SimulationPanel(QtWidgets.QWidget):
         painting_layout.addStretch()
 
         self.stack.addWidget(self.painting_view)
-        
+
         # Initial State
         self.switch_view(0)
 
@@ -1108,9 +1105,6 @@ class SimulationPanel(QtWidgets.QWidget):
 
     def update_object_position(self):
         """Moves the selected simulation object to P1 coordinates and compiles the path for Pick and Place."""
-        # Auto-switch to objects tab so user can see coordinates
-        self.switch_view(2)
-        
         current_item = self.objects_list.currentItem()
         if not current_item:
             self.main_window.log("âš ï¸ Select an object from the list first.")
@@ -1516,9 +1510,11 @@ class SimulationPanel(QtWidgets.QWidget):
         # - slightly larger lift to clear the table and keep the part centered
         clearance_cm = max(0.5, min(2.0, max(0.5, object_height_cm * 0.12)))
         squeeze_cm = 0.0 if using_selected_faces else max(0.05, min(0.25, object_thickness_cm * 0.03))
+        if isinstance(geo_data, dict) and geo_data.get("selected_surface_contact_only"):
+            squeeze_cm = 0.0
         required_open_cm = object_thickness_cm + clearance_cm
         close_gap_cm = max(0.0, object_thickness_cm - squeeze_cm)
-        if using_selected_faces:
+        if using_selected_faces or (isinstance(geo_data, dict) and geo_data.get("selected_surface_contact_only")):
             close_gap_cm = object_thickness_cm
 
         approach_z_cm = max(5.0, object_height_cm * 0.35)
@@ -1620,33 +1616,106 @@ class SimulationPanel(QtWidgets.QWidget):
             QtCore.QTimer.singleShot(0, lambda: self.main_window.canvas.start_edge_picking(self._on_weld_edge_picked, color="#e65100"))
 
     def _start_weld_live_point_pick(self):
-        """Activate point picking so the user can define the weld start reference."""
-        self.main_window.log("📍 Click a point on the weld edge to set the live weld point.")
-        self.main_window.show_toast("Pick weld live point", "info")
+        """Activate face picking so the user can define the weld contact reference."""
+        self.main_window.log("🎯 Click a weld face so its center becomes the contact reference.")
+        self.main_window.show_toast("Pick weld contact face", "info")
         self.weld_live_point_active = True
-        self.main_window.canvas.start_point_picking(self._on_weld_live_point_picked)
+        self.main_window.canvas.start_face_picking(self._on_weld_live_face_picked, color="#e65100")
 
-    def _on_weld_live_point_picked(self, world_pt):
-        """Store the picked point as the weld start reference."""
-        picked = np.array(world_pt, dtype=float)
+    def _edge_record_key(self, link_name, edge_points):
+        """Return a stable signature for an edge record."""
+        p1 = np.round(np.array(edge_points[0], dtype=float), 6)
+        p2 = np.round(np.array(edge_points[1], dtype=float), 6)
+        ordered = sorted((tuple(p1.tolist()), tuple(p2.tolist())))
+        return (str(link_name), ordered[0], ordered[1])
+
+    def _store_weld_contact_reference(self, picked_world, link_name=None, normal_world=None, source="point"):
+        """Store the weld contact reference and map it to the nearest selected edge."""
+        picked = np.array(picked_world, dtype=float)
         edge_idx, projected = self._find_nearest_selected_weld_edge(picked)
+
         self.weld_live_point_world = projected if projected is not None else picked
-        self.weld_live_point_link = None
-        self.weld_live_point_edge_index = edge_idx
-        self.weld_live_point_active = False
+        self.weld_live_point_link = link_name
+        self.weld_live_point_source = source
+        self.weld_live_point_normal = None if normal_world is None else np.array(normal_world, dtype=float)
+        self.weld_contact_face_data = None
+        self.weld_live_point_edge_key = None
+
+        if edge_idx is not None and 0 < edge_idx <= len(self.weld_edge_records):
+            selected_edge = self.weld_edge_records[edge_idx - 1]
+            self.weld_live_point_edge_key = self._edge_record_key(
+                selected_edge.get("link"),
+                selected_edge.get("edge_points", []),
+            )
+
+        if source == "face":
+            self.weld_contact_face_data = {
+                "name": link_name,
+                "picked_center": picked.copy(),
+                "contact_point": self.weld_live_point_world.copy(),
+                "normal": None if normal_world is None else np.array(normal_world, dtype=float),
+            }
 
         if hasattr(self, "weld_live_point_label"):
             ratio = self.main_window.canvas.grid_units_per_cm
             pt_cm = self.weld_live_point_world / ratio
-            self.weld_live_point_label.setText(
-                f"Weld live point: ({pt_cm[0]:.2f}, {pt_cm[1]:.2f}, {pt_cm[2]:.2f}) cm"
+            if source == "face" and link_name:
+                self.weld_live_point_label.setText(
+                    f"Weld contact face: {link_name} center ({pt_cm[0]:.2f}, {pt_cm[1]:.2f}, {pt_cm[2]:.2f}) cm"
+                )
+            else:
+                self.weld_live_point_label.setText(
+                    f"Weld contact reference: ({pt_cm[0]:.2f}, {pt_cm[1]:.2f}, {pt_cm[2]:.2f}) cm"
+                )
+
+        if edge_idx is not None:
+            self.main_window.log(
+                f"📍 Weld contact reference mapped to selected edge #{edge_idx} at "
+                f"({self.weld_live_point_world[0]:.2f}, {self.weld_live_point_world[1]:.2f}, {self.weld_live_point_world[2]:.2f})"
+            )
+        else:
+            self.main_window.log(
+                f"📍 Weld contact reference set at ({self.weld_live_point_world[0]:.2f}, "
+                f"{self.weld_live_point_world[1]:.2f}, {self.weld_live_point_world[2]:.2f})"
             )
 
-        self.main_window.log(
-            f"📍 Weld live point set at ({self.weld_live_point_world[0]:.2f}, "
-            f"{self.weld_live_point_world[1]:.2f}, {self.weld_live_point_world[2]:.2f})"
-        )
-        self.main_window.show_toast("Weld live point saved", "success")
+        self.main_window.show_toast("Weld contact reference saved", "success")
+
+    def _sanitize_welding_panel_text(self):
+        """Normalize visible Welding panel text so encoding glitches do not leak into the UI."""
+        if not hasattr(self, "welding_view"):
+            return
+
+        text_map = {
+            "ðŸ”¥ WELDING MODE": "WELDING MODE",
+            "ðŸ“¥ Import STEP / STL": "Import STEP / STL",
+            "Ã¢â€ºÂÃ¯Â¸Â Select Welding Edges": "Select Welding Edges",
+            "🗑️ Clear Edges": "Clear Edges",
+            "▶ Start Welding": "Start Welding",
+            "ðŸŽ¯ Pick Weld Contact Face": "Pick Weld Contact Face",
+            "↔ Apply Object Move": "Apply Object Move",
+            "Weld contact reference: not selected": "Weld contact reference: not selected",
+        }
+
+        for widget in self.welding_view.findChildren(QtWidgets.QLabel):
+            replacement = text_map.get(widget.text())
+            if replacement is not None:
+                widget.setText(replacement)
+
+        for widget in self.welding_view.findChildren(QtWidgets.QPushButton):
+            replacement = text_map.get(widget.text())
+            if replacement is not None:
+                widget.setText(replacement)
+
+    def _on_weld_live_point_picked(self, world_pt):
+        """Store the picked point as the weld start reference."""
+        self.weld_live_point_active = False
+        self._store_weld_contact_reference(world_pt, source="point")
+
+    def _on_weld_live_face_picked(self, link_name, center_world, normal_world):
+        """Store the picked face center as the weld contact reference."""
+        self.weld_live_point_active = False
+        self._store_weld_contact_reference(center_world, link_name=link_name, normal_world=normal_world, source="face")
 
     def _add_weld_edge_record(self, record):
         """Store a new weld edge unless it already exists."""
@@ -1678,6 +1747,14 @@ class SimulationPanel(QtWidgets.QWidget):
         self.weld_edge_records = []
         self.welding_paths = []
         self.weld_json_view.clear()
+        self.weld_live_point_world = None
+        self.weld_live_point_link = None
+        self.weld_live_point_edge_key = None
+        self.weld_live_point_source = None
+        self.weld_live_point_normal = None
+        self.weld_contact_face_data = None
+        if hasattr(self, "weld_live_point_label"):
+            self.weld_live_point_label.setText("Weld contact reference: not selected")
         self.current_weld_path_idx = 0
         self.current_weld_point_idx = 0
         self.is_welding_active = False
@@ -1716,7 +1793,10 @@ class SimulationPanel(QtWidgets.QWidget):
             f"{len(self.welding_paths)} path block(s)."
         )
         if self.weld_live_point_world is not None:
-            self.main_window.log("📍 Welding will start from the selected live point reference.")
+            if self.weld_contact_face_data is not None:
+                self.main_window.log("📍 Welding will start from the selected contact face center.")
+            else:
+                self.main_window.log("📍 Welding will start from the selected live point reference.")
         self.main_window.show_toast("Weld JSON generated", "success")
 
         self.is_welding_active = True
@@ -1729,7 +1809,6 @@ class SimulationPanel(QtWidgets.QWidget):
         self.weld_tcp_link = self._get_tcp_link()
         self.weld_tool_offset = np.zeros(3, dtype=float)
         self.weld_live_trail_points = []
-        self.weld_live_point_edge_index = None
         self._clear_weld_live_trail()
         self.start_weld_btn.setText("⏹ Stop Welding")
         self.start_weld_btn.setStyleSheet("""
@@ -1758,7 +1837,10 @@ class SimulationPanel(QtWidgets.QWidget):
         self.weld_joint_chain = []
         self.weld_tcp_link = None
         self.weld_live_trail_points = []
-        self.weld_live_point_edge_index = None
+        self.weld_live_point_edge_key = None
+        self.weld_contact_face_data = None
+        self.weld_live_point_source = None
+        self.weld_live_point_normal = None
         self._clear_weld_live_trail()
         if self.weld_timer.isActive():
             self.weld_timer.stop()
@@ -1876,13 +1958,14 @@ class SimulationPanel(QtWidgets.QWidget):
 
     def _build_welding_payload(self):
         """Build JSON-ready welding paths from the selected edge records."""
-        weld_type_choice = self.weld_type_combo.currentText().lower()
-        step_mm = float(self.weld_step_sb.value())
-        offset_mm = float(self.weld_offset_sb.value())
-        torch_angle_deg = float(self.weld_torch_angle_sb.value())
-        approach_mm = float(self.weld_approach_sb.value())
-        retract_mm = float(self.weld_retract_sb.value())
-        feed_mm_s = float(self.weld_feed_sb.value())
+        settings = getattr(self, "weld_settings", None) or {}
+        weld_type_choice = str(settings.get("weld_type", "auto")).lower()
+        step_mm = float(settings.get("step_size_mm", 5.0))
+        offset_mm = float(settings.get("offset_mm", 0.0))
+        torch_angle_deg = float(settings.get("torch_angle_deg", 45.0))
+        approach_mm = float(settings.get("approach_mm", 25.0))
+        retract_mm = float(settings.get("retract_mm", 25.0))
+        feed_mm_s = float(settings.get("feed_mm_s", 10.0))
 
         paths = []
         warnings = []
@@ -1929,7 +2012,7 @@ class SimulationPanel(QtWidgets.QWidget):
         world_to_mm = 10.0 / ratio
         warnings = []
         live_point_world = getattr(self, "weld_live_point_world", None)
-        live_point_edge_index = getattr(self, "weld_live_point_edge_index", None)
+        live_point_edge_key = getattr(self, "weld_live_point_edge_key", None)
 
         if link is None or link.mesh is None:
             return {
@@ -1948,7 +2031,8 @@ class SimulationPanel(QtWidgets.QWidget):
             warnings.append("Edge segment is very short; path sampling collapsed to endpoints.")
             weld_points = [p1_world, p2_world]
 
-        if live_point_world is not None and live_point_edge_index == edge.get("edge_index"):
+        edge_key = self._edge_record_key(edge.get("link"), edge.get("edge_points", []))
+        if live_point_world is not None and live_point_edge_key == edge_key:
             weld_points, live_warning = self._start_edge_from_live_point(weld_points, live_point_world)
             if live_warning:
                 warnings.append(live_warning)
@@ -4648,6 +4732,214 @@ class SimulationPanel(QtWidgets.QWidget):
         """)
         return btn
 
+    def _build_ik_view(self):
+        view = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(view)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(12)
+
+        title = QtWidgets.QLabel("IK MODE")
+        title.setAlignment(QtCore.Qt.AlignCenter)
+        title.setStyleSheet("font-weight: bold; font-size: 16px; color: #1976d2;")
+        layout.addWidget(title)
+
+        group = QtWidgets.QGroupBox("Inverse Kinematics")
+        group.setStyleSheet("QGroupBox { border: 1px solid #d7e3f4; border-radius: 8px; margin-top: 10px; padding-top: 14px; font-weight: bold; color: #1565c0; }")
+        group_layout = QtWidgets.QGridLayout(group)
+        group_layout.setHorizontalSpacing(10)
+        group_layout.setVerticalSpacing(8)
+
+        self.ik_target_combo = QtWidgets.QComboBox()
+        self.ik_target_combo.addItems(["P1", "P2", "HOME"])
+        self.ik_target_combo.currentIndexChanged.connect(self.refresh_ik_view)
+
+        self.ik_offset_spin = QtWidgets.QDoubleSpinBox()
+        self.ik_offset_spin.setRange(-100.0, 100.0)
+        self.ik_offset_spin.setSingleStep(0.5)
+        self.ik_offset_spin.setSuffix(" cm")
+        self.ik_offset_spin.setValue(0.0)
+        self.ik_offset_spin.valueChanged.connect(self.refresh_ik_view)
+
+        self.ik_speed_spin = QtWidgets.QSpinBox()
+        self.ik_speed_spin.setRange(1, 100)
+        self.ik_speed_spin.setValue(int(getattr(self.main_window, "current_speed", 50)))
+
+        self.ik_preview_btn = QtWidgets.QPushButton("Preview IK")
+        self.ik_preview_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.ik_preview_btn.setStyleSheet("background-color: #f5f5f5; color: #212121; font-weight: bold; border: 1px solid #d0d0d0; border-radius: 6px; padding: 8px 14px;")
+        self.ik_preview_btn.clicked.connect(self.preview_ik_from_panel)
+
+        self.ik_solve_btn = QtWidgets.QPushButton("Solve IK")
+        self.ik_solve_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.ik_solve_btn.setStyleSheet("background-color: #1976d2; color: white; font-weight: bold; border-radius: 6px; padding: 8px 14px;")
+        self.ik_solve_btn.clicked.connect(self.solve_ik_from_panel)
+
+        group_layout.addWidget(QtWidgets.QLabel("Target"), 0, 0)
+        group_layout.addWidget(self.ik_target_combo, 0, 1)
+        group_layout.addWidget(QtWidgets.QLabel("Z Offset"), 1, 0)
+        group_layout.addWidget(self.ik_offset_spin, 1, 1)
+        group_layout.addWidget(QtWidgets.QLabel("Speed"), 2, 0)
+        group_layout.addWidget(self.ik_speed_spin, 2, 1)
+        group_layout.addWidget(self.ik_preview_btn, 3, 0)
+        group_layout.addWidget(self.ik_solve_btn, 3, 1)
+
+        layout.addWidget(group)
+
+        self.ik_summary = QtWidgets.QLabel("Select a target to inspect or solve IK.")
+        self.ik_summary.setWordWrap(True)
+        self.ik_summary.setStyleSheet("color: #424242; font-size: 12px;")
+        layout.addWidget(self.ik_summary)
+
+        self.ik_result = QtWidgets.QPlainTextEdit()
+        self.ik_result.setReadOnly(True)
+        self.ik_result.setPlaceholderText("IK solution details will appear here...")
+        self.ik_result.setMinimumHeight(220)
+        self.ik_result.setStyleSheet("QPlainTextEdit { border: 1px solid #ddd; border-radius: 6px; background: #fafafa; font-family: Consolas, 'Courier New', monospace; font-size: 11px; }")
+        layout.addWidget(self.ik_result)
+
+        layout.addStretch()
+        self.refresh_ik_view()
+        return view
+
+    def _build_fk_view(self):
+        view = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(view)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(12)
+
+        title = QtWidgets.QLabel("FK MODE")
+        title.setAlignment(QtCore.Qt.AlignCenter)
+        title.setStyleSheet("font-weight: bold; font-size: 16px; color: #1976d2;")
+        layout.addWidget(title)
+
+        group = QtWidgets.QGroupBox("Forward Kinematics")
+        group.setStyleSheet("QGroupBox { border: 1px solid #d7e3f4; border-radius: 8px; margin-top: 10px; padding-top: 14px; font-weight: bold; color: #1565c0; }")
+        group_layout = QtWidgets.QVBoxLayout(group)
+
+        self.fk_refresh_btn = QtWidgets.QPushButton("Refresh FK")
+        self.fk_refresh_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.fk_refresh_btn.setStyleSheet("background-color: #1976d2; color: white; font-weight: bold; border-radius: 6px; padding: 8px 14px;")
+        self.fk_refresh_btn.clicked.connect(self.refresh_fk_view)
+        group_layout.addWidget(self.fk_refresh_btn)
+
+        self.fk_summary = QtWidgets.QLabel("Press Refresh FK to inspect the current TCP pose.")
+        self.fk_summary.setWordWrap(True)
+        self.fk_summary.setStyleSheet("color: #424242; font-size: 12px;")
+        group_layout.addWidget(self.fk_summary)
+
+        self.fk_result = QtWidgets.QPlainTextEdit()
+        self.fk_result.setReadOnly(True)
+        self.fk_result.setPlaceholderText("FK pose details will appear here...")
+        self.fk_result.setMinimumHeight(260)
+        self.fk_result.setStyleSheet("QPlainTextEdit { border: 1px solid #ddd; border-radius: 6px; background: #fafafa; font-family: Consolas, 'Courier New', monospace; font-size: 11px; }")
+        group_layout.addWidget(self.fk_result)
+
+        layout.addWidget(group)
+        layout.addStretch()
+        self.refresh_fk_view()
+        return view
+
+    def refresh_ik_view(self):
+        if not hasattr(self, "ik_summary"):
+            return
+
+        tcp_link = self.main_window._resolve_home_tcp_link() if hasattr(self.main_window, "_resolve_home_tcp_link") else None
+        if tcp_link is None:
+            self.ik_summary.setText("No TCP link found. Create a joint chain first.")
+            self.ik_result.setPlainText("No TCP link available for IK solving.")
+            return
+
+        target_name = self.ik_target_combo.currentText()
+        probe = self._build_motion_target(target_name, tcp_link, z_offset_cm=float(self.ik_offset_spin.value()))
+        target_cm = probe["target_cm"]
+        self.ik_summary.setText(f"Target {target_name}: X={target_cm[0]:.2f} cm, Y={target_cm[1]:.2f} cm, Z={target_cm[2]:.2f} cm")
+        self.ik_result.setPlainText(
+            f"TCP Link: {tcp_link.name}\n"
+            f"Target World: {np.array2string(probe['target_world'], precision=3, suppress_small=True)}\n"
+            f"Tool Offset: {np.array2string(probe['tool_local'], precision=3, suppress_small=True)}\n"
+            f"Home Target: {probe['is_home_target']}\n"
+            f"Z Offset: {probe['final_z_offset']:.3f} world units"
+        )
+
+    def refresh_fk_view(self):
+        if not hasattr(self, "fk_summary"):
+            return
+
+        tcp_link = self.main_window._resolve_home_tcp_link() if hasattr(self.main_window, "_resolve_home_tcp_link") else None
+        if tcp_link is None:
+            self.fk_summary.setText("No TCP link found. Create a joint chain first.")
+            self.fk_result.setPlainText("No TCP link available for FK inspection.")
+            return
+
+        ratio = self.main_window.canvas.grid_units_per_cm if hasattr(self.main_window, "canvas") and self.main_window.canvas is not None else 10.0
+        self.main_window.robot.update_kinematics()
+        _, tool_local, _ = self.main_window.get_link_tool_point(tcp_link, return_vec=True)
+        tcp_world = (tcp_link.t_world @ np.append(tool_local, 1.0))[:3]
+        tcp_cm = tcp_world / ratio
+
+        joint_lines = []
+        for name, joint in self.main_window.robot.joints.items():
+            joint_lines.append(f"{name}: {joint.current_value:.2f} deg")
+
+        self.fk_summary.setText(f"TCP {tcp_link.name}: X={tcp_cm[0]:.2f} cm, Y={tcp_cm[1]:.2f} cm, Z={tcp_cm[2]:.2f} cm")
+        self.fk_result.setPlainText(
+            f"TCP Link: {tcp_link.name}\n"
+            f"TCP World Position (cm): {np.array2string(tcp_cm, precision=3, suppress_small=True)}\n\n"
+            f"TCP Transform Matrix:\n{np.array2string(tcp_link.t_world, precision=4, suppress_small=True)}\n\n"
+            f"Current Joints:\n" + "\n".join(joint_lines)
+        )
+
+    def _solve_ik_from_panel(self, apply_solution: bool):
+        tcp_link = self.main_window._resolve_home_tcp_link() if hasattr(self.main_window, "_resolve_home_tcp_link") else None
+        if tcp_link is None:
+            self.main_window.log("⚠️ IK: No TCP link found. Create a joint chain first.")
+            return False
+
+        target_name = self.ik_target_combo.currentText()
+        probe = self._build_motion_target(target_name, tcp_link, z_offset_cm=float(self.ik_offset_spin.value()))
+        ratio = probe["ratio"]
+        target_world = probe["target_world"]
+        tool_local = probe["tool_local"]
+
+        start_vals = {n: j.current_value for n, j in self.main_window.robot.joints.items()}
+        reached = self.main_window.robot.inverse_kinematics(
+            target_world,
+            tcp_link,
+            max_iters=300,
+            tolerance=0.5 * ratio,
+            tool_offset=tool_local,
+        )
+
+        if not reached:
+            self.main_window.log(f"⚠️ IK: {target_name} is only partially reachable.")
+            self.main_window.show_toast("IK target partially reachable", "warning")
+
+        solved = {n: j.current_value for n, j in self.main_window.robot.joints.items()}
+        if not apply_solution:
+            for n, val in start_vals.items():
+                if n in self.main_window.robot.joints:
+                    self.main_window.robot.joints[n].current_value = val
+            self.main_window.robot.update_kinematics()
+
+        if hasattr(self.main_window, "canvas") and self.main_window.canvas is not None:
+            self.main_window.canvas.update_transforms(self.main_window.robot)
+        self.main_window.update_live_ui()
+
+        self.ik_result.setPlainText(
+            f"Target: {target_name}\n"
+            f"Reached: {reached}\n"
+            f"Applied: {apply_solution}\n\n"
+            + "\n".join(f"{name}: {value:.2f} deg" for name, value in solved.items())
+        )
+        self.main_window.log(f"✅ IK {('applied' if apply_solution else 'previewed')} for {target_name}.")
+        return reached
+
+    def solve_ik_from_panel(self):
+        self._solve_ik_from_panel(apply_solution=True)
+
+    def preview_ik_from_panel(self):
+        self._solve_ik_from_panel(apply_solution=False)
+
     def switch_view(self, index):
         # Only run cleanup when the main window is fully ready (canvas + console exist)
         mw = getattr(self, 'main_window', None)
@@ -4686,13 +4978,6 @@ class SimulationPanel(QtWidgets.QWidget):
                 except Exception:
                     pass
 
-            # Return robot to home position
-            if hasattr(mw, 'go_home') and mw.robot.joints:
-                try:
-                    mw.go_home()
-                except Exception:
-                    pass
-
         self.stack.setCurrentIndex(index)
         # Style active button
         active_style = """
@@ -4723,13 +5008,16 @@ class SimulationPanel(QtWidgets.QWidget):
             }
         """
         
-        all_btns = [self.joints_btn, self.matrices_btn, self.objects_btn, self.welding_btn, self.painting_btn]
+        all_btns = [self.joints_btn, self.matrices_btn, self.code_btn, self.ik_fk_btn]
         for i, btn in enumerate(all_btns):
             btn.setStyleSheet(active_style if i == index else inactive_style)
         
         # Refresh data for the selected view
         if index == 1:
             self.refresh_matrices()
+        elif index == 3 and hasattr(self, "ik_fk_view"):
+            self.ik_fk_view.refresh_sliders()
+
 
     def refresh_joints(self):
         # Reset ghost angle tracking dict on each refresh
@@ -4848,6 +5136,69 @@ class SimulationPanel(QtWidgets.QWidget):
             slider.valueChanged.connect(lambda val, n=name: self.on_slider_change(n, val))
             val_spin.valueChanged.connect(lambda val, n=name: self.on_slider_change(n, val))
 
+    def _selected_sim_object_name(self):
+        if hasattr(self.main_window, "sim_objects_list"):
+            item = self.main_window.sim_objects_list.currentItem()
+            if item:
+                return item.text()
+        return None
+
+    def make_robo_from_selected_object(self):
+        name = self._selected_sim_object_name()
+        if not name:
+            self.main_window.show_toast("Select a simulation object first", "warning")
+            return
+
+        links_tab = getattr(self.main_window, "links_tab", None)
+        links_list = getattr(links_tab, "links_list", None) if links_tab else None
+        if not links_tab or links_list is None:
+            self.main_window.show_toast("Links tab is not ready", "warning")
+            return
+
+        items = links_list.findItems(name, QtCore.Qt.MatchExactly)
+        if not items:
+            self.main_window.show_toast("Selected object is not in the robot list", "warning")
+            return
+
+        links_list.setCurrentItem(items[0])
+        links_tab.set_as_base()
+        self.main_window.log(f"✅ Make Robo: promoted '{name}' to the robot base from Simulation.")
+        self.main_window.show_toast(f"Make Robo: {name}", "success")
+
+    def set_selected_sim_object_visible(self, visible):
+        name = self._selected_sim_object_name()
+        if not name:
+            self.main_window.show_toast("Select a simulation object first", "warning")
+            return
+
+        canvas = getattr(self.main_window, "canvas", None)
+        actor = getattr(canvas, "actors", {}).get(name) if canvas is not None else None
+        if actor is None:
+            self.main_window.show_toast("Selected object is not visible in the canvas", "warning")
+            return
+
+        actor.SetVisibility(bool(visible))
+        if canvas is not None and hasattr(canvas, "plotter"):
+            canvas.plotter.render()
+        self.main_window.log(f"{'Shown' if visible else 'Hidden'} simulation object: {name}")
+
+    def set_home_coordinates_visible(self, visible):
+        for widget in getattr(self, "home_coord_widgets", []):
+            widget.setVisible(bool(visible))
+
+    def set_live_point_visible(self, visible):
+        for widget in getattr(self, "live_coord_widgets", []):
+            widget.setVisible(bool(visible))
+
+    def update_sliders_from_robot(self):
+        """Compatibility hook used by the main window when the Simulation tab is shown."""
+        self.refresh_joints()
+
+    def refresh_sim_objects_list(self):
+        """Compatibility hook used by the main window to refresh simulation objects."""
+        if hasattr(self.main_window, "refresh_sim_objects_list"):
+            self.main_window.refresh_sim_objects_list()
+
     def refresh_matrices(self):
         # Clear existing items in Matrices View
         while self.matrices_scroll_layout.count():
@@ -4956,11 +5307,12 @@ class SimulationPanel(QtWidgets.QWidget):
                     _mesh = _link.mesh
                     _transform = _np2.copy(_link.t_world)
                     _col = getattr(_link, 'color', '#888888') or '#888888'
-                    self.main_window.canvas.add_joint_ghost(
-                        _link.name,
-                        mesh=_mesh, transform=_transform,
-                        color=_col
-                    )
+                    if hasattr(self.main_window, "canvas") and self.main_window.canvas is not None:
+                        self.main_window.canvas.add_joint_ghost(
+                            _link.name,
+                            mesh=_mesh, transform=_transform,
+                            color=_col
+                        )
                     
                     # 2. Related (Slave) Joint Trails
                     if name in self.main_window.robot.joint_relations:
@@ -4971,11 +5323,12 @@ class SimulationPanel(QtWidgets.QWidget):
                                 s_mesh = s_link.mesh
                                 s_transform = _np2.copy(s_link.t_world)
                                 s_col = getattr(s_link, 'color', '#888888') or '#888888'
-                                self.main_window.canvas.add_joint_ghost(
-                                    s_link.name,
-                                    mesh=s_mesh, transform=s_transform,
-                                    color=s_col
-                                )
+                                if hasattr(self.main_window, "canvas") and self.main_window.canvas is not None:
+                                    self.main_window.canvas.add_joint_ghost(
+                                        s_link.name,
+                                        mesh=s_mesh, transform=s_transform,
+                                        color=s_col
+                                    )
                     
                     self._last_ghost_angle[name] = _cur_angle
             except Exception:
@@ -4984,7 +5337,8 @@ class SimulationPanel(QtWidgets.QWidget):
             # Show Speed Overlay on 3D Canvas
             self.main_window.show_speed_overlay()
             
-            self.main_window.canvas.plotter.render()
+            if hasattr(self.main_window, "canvas") and self.main_window.canvas is not None:
+                self.main_window.canvas.plotter.render()
             
             # Send command to hardware with current speed
             if hasattr(self.main_window, 'serial_mgr') and self.main_window.serial_mgr.is_connected:

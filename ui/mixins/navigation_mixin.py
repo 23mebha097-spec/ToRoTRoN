@@ -219,17 +219,28 @@ class NavigationMixin:
 
     def refresh_sim_objects_list(self):
         """Clears and re-populates the simulation objects list from the robot model."""
-        if not hasattr(self, 'sim_objects_list'):
+        sim_list = getattr(self, 'sim_objects_list', None)
+        if sim_list is None:
+            sim_tab = getattr(self, 'simulation_tab', None)
+            sim_list = getattr(sim_tab, 'objects_list', None) if sim_tab is not None else None
+        if sim_list is None:
             return
-            
-        self.sim_objects_list.clear()
+
+        sim_list.clear()
         for name, link in self.robot.links.items():
             if getattr(link, 'is_sim_obj', False):
                 self.add_sim_object_item(name)
 
     def add_sim_object_item(self, name):
         """Helper to add a simulation object to the list with a delete button."""
-        item = QtWidgets.QListWidgetItem(self.sim_objects_list)
+        sim_list = getattr(self, 'sim_objects_list', None)
+        if sim_list is None:
+            sim_tab = getattr(self, 'simulation_tab', None)
+            sim_list = getattr(sim_tab, 'objects_list', None) if sim_tab is not None else None
+        if sim_list is None:
+            return
+
+        item = QtWidgets.QListWidgetItem()
         item.setText(name)
         
         widget = QtWidgets.QWidget()
@@ -275,8 +286,8 @@ class NavigationMixin:
         layout.addWidget(del_btn)
         
         item.setSizeHint(QtCore.QSize(0, 36))
-        self.sim_objects_list.addItem(item)
-        self.sim_objects_list.setItemWidget(item, widget)
+        sim_list.addItem(item)
+        sim_list.setItemWidget(item, widget)
 
     def remove_sim_object(self, name):
         """Permanently removes a simulation object from the workspace."""
@@ -363,7 +374,14 @@ class NavigationMixin:
 
     def save_sim_object_coords(self):
         """Saves current spinbox values back to the selected simulation object."""
-        current_item = self.sim_objects_list.currentItem()
+        sim_list = getattr(self, 'sim_objects_list', None)
+        if sim_list is None:
+            sim_tab = getattr(self, 'simulation_tab', None)
+            sim_list = getattr(sim_tab, 'objects_list', None) if sim_tab is not None else None
+        if sim_list is None:
+            return
+
+        current_item = sim_list.currentItem()
         if not current_item:
             return
             
@@ -620,9 +638,13 @@ class NavigationMixin:
 
         # 1. Identify 'Fingers' (ONLY child links of joints explicitly marked as 'Gripper')
         fingers = []
+        touch_only_selected = False
         for joint in link.child_joints:
             if getattr(joint, 'is_gripper', False) and joint.child_link:
                 fingers.append(joint.child_link)
+                touch_only_selected = touch_only_selected or bool(
+                    getattr(joint, 'gripping_surface_touch_only', False)
+                )
 
         # --- Priority 0: Explicit gripping surfaces selected in Gripper tab ---
         surface_samples = self._get_gripper_surface_samples(link)
@@ -682,7 +704,8 @@ class NavigationMixin:
                     "finger_depth": finger_depth,
                     "real_gap": real_gap,
                     "centers_span": max_span_centers,
-                    "using_selected_gripping_surfaces": True
+                    "using_selected_gripping_surfaces": True,
+                    "selected_surface_contact_only": touch_only_selected,
                 }
 
             return world_tool_point, local_tool_point, real_gap
@@ -709,7 +732,9 @@ class NavigationMixin:
                             gap = max(gap, np.linalg.norm(pts_world[i] - pts_world[j]))
             
             if return_vec:
-                return world_tool_point, local_tool_point, None
+                return world_tool_point, local_tool_point, {
+                    "selected_surface_contact_only": touch_only_selected,
+                }
             return world_tool_point, local_tool_point, gap
 
         # 2. Case: Multiple Fingers (Midpoint TCP Fallback)
@@ -1106,23 +1131,18 @@ class NavigationMixin:
 
     def show_speed_overlay(self):
         """Displays current speed percentage on the 3D canvas temporarily"""
+        if not hasattr(self, 'canvas') or self.canvas is None:
+            return
+
         text = f"Speed: {self.current_speed}%"
         self.canvas.plotter.add_text(
-            text, 
-            position='lower_right', 
-            font_size=12, 
-            color='#1976d2', 
+            text,
+            position='lower_right',
+            font_size=12,
+            color='#1976d2',
             name="speed_overlay"
         )
-        if hasattr(self, 'canvas') and self.canvas:
-            self.canvas.plotter.add_text(
-                text, 
-                position='lower_right', 
-                font_size=12, 
-                color='#1976d2', 
-                name="speed_overlay"
-            )
-            self.canvas.plotter.render()
+        self.canvas.plotter.render()
 
     def on_tab_changed(self, index):
         # Disable dragging for all tabs except 'Links' or 'Simulation'

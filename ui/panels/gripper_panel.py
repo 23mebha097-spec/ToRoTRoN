@@ -77,9 +77,154 @@ class GripperPanel(QtWidgets.QWidget):
         self.mark_gripper_check.toggled.connect(self.on_mark_toggled)
         sel_layout.addWidget(self.mark_gripper_check)
 
+        self.select_gripping_surface_btn = QtWidgets.QPushButton("Select Gripper Surface")
+        self.select_gripping_surface_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.select_gripping_surface_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #ffffff;
+                color: #2e7d32;
+                border: 2px solid #4caf50;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #e8f5e9;
+            }
+            QPushButton:disabled {
+                color: #9aa89a;
+                border-color: #c8e6c9;
+                background-color: #f7fbf7;
+            }
+        """)
+        self.select_gripping_surface_btn.setToolTip(
+            "Pick the touching face for the selected gripper pair."
+        )
+        self.select_gripping_surface_btn.clicked.connect(self.on_select_contact_surface)
+        self.select_gripping_surface_btn.setEnabled(False)
+        sel_layout.addWidget(self.select_gripping_surface_btn)
+
+        self.select_gripping_surface_hint = QtWidgets.QLabel(
+            "Select a gripper pair, then click the face on that pair that should touch the object."
+        )
+        self.select_gripping_surface_hint.setWordWrap(True)
+        self.select_gripping_surface_hint.setStyleSheet(
+            "color: #757575; font-size: 12px; padding-top: 2px;"
+        )
+        sel_layout.addWidget(self.select_gripping_surface_hint)
+
         layout.addWidget(selection_group)
 
-        control_group = QtWidgets.QGroupBox("2. MANUAL ACTIONS")
+        surface_group = QtWidgets.QGroupBox("2. SELECTED GRIPPER SURFACE")
+        surface_group.setStyleSheet(self._group_style())
+        surface_layout = QtWidgets.QVBoxLayout(surface_group)
+
+        self.surface_target_label = QtWidgets.QLabel("Target Link: -")
+        self.surface_target_label.setStyleSheet("color: #616161; font-size: 12px;")
+        surface_layout.addWidget(self.surface_target_label)
+
+        self.surface_list = QtWidgets.QListWidget()
+        self.surface_list.setFixedHeight(140)
+        self.surface_list.setStyleSheet(self._surface_list_style())
+        self.surface_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.surface_list.itemClicked.connect(self.on_surface_candidate_clicked)
+        surface_layout.addWidget(self.surface_list)
+
+        surface_button_row = QtWidgets.QHBoxLayout()
+        self.select_surface_btn = QtWidgets.QPushButton("Select As Gripping Surface")
+        self.select_surface_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.select_surface_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e8f5e9;
+                color: #2e7d32;
+                border: 1px solid #4caf50;
+                border-radius: 6px;
+                padding: 7px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #dcedc8;
+            }
+            QPushButton:disabled {
+                color: #9aa89a;
+                border-color: #c8e6c9;
+                background-color: #f7fbf7;
+            }
+        """)
+        self.select_surface_btn.clicked.connect(self.on_select_gripping_surface)
+        surface_button_row.addWidget(self.select_surface_btn)
+
+        self.refresh_surface_btn = QtWidgets.QPushButton("Refresh Face Names")
+        self.refresh_surface_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self.refresh_surface_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                color: #546e7a;
+                border: 1px solid #b0bec5;
+                border-radius: 6px;
+                padding: 7px 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #eceff1;
+            }
+            QPushButton:disabled {
+                color: #9aa89a;
+                border-color: #d0d7da;
+                background-color: #f7fbf7;
+            }
+        """)
+        self.refresh_surface_btn.clicked.connect(self.on_refresh_surface_names)
+        surface_button_row.addWidget(self.refresh_surface_btn)
+        surface_layout.addLayout(surface_button_row)
+
+        self.show_selected_faces_check = QtWidgets.QCheckBox("Show selected faces in 3D")
+        self.show_selected_faces_check.setStyleSheet(
+            "color: #2e7d32; font-weight: bold; padding-top: 2px;"
+        )
+        self.show_selected_faces_check.toggled.connect(self.on_show_selected_faces_toggled)
+        surface_layout.addWidget(self.show_selected_faces_check)
+
+        self.surface_status_label = QtWidgets.QLabel("Select a gripper joint to see its face names.")
+        self.surface_status_label.setWordWrap(True)
+        self.surface_status_label.setStyleSheet("color: #757575; font-size: 12px; padding-top: 2px;")
+        surface_layout.addWidget(self.surface_status_label)
+
+        self.gripping_surface_status_label = QtWidgets.QLabel("Gripping Surface: not set.")
+        self.gripping_surface_status_label.setWordWrap(True)
+        self.gripping_surface_status_label.setStyleSheet("color: #616161; font-size: 12px;")
+        surface_layout.addWidget(self.gripping_surface_status_label)
+
+        self.paired_gripping_surface_status_label = QtWidgets.QLabel("Second Gripping Surface: disabled.")
+        self.paired_gripping_surface_status_label.setWordWrap(True)
+        self.paired_gripping_surface_status_label.setStyleSheet("color: #616161; font-size: 12px;")
+        surface_layout.addWidget(self.paired_gripping_surface_status_label)
+
+        paired_row = QtWidgets.QHBoxLayout()
+        self.use_second_surface_check = QtWidgets.QCheckBox("Use second gripping surface")
+        self.use_second_surface_check.setStyleSheet("color: #2e7d32; font-weight: bold;")
+        self.use_second_surface_check.toggled.connect(self.on_use_second_surface_toggled)
+        paired_row.addWidget(self.use_second_surface_check)
+        paired_row.addStretch()
+        surface_layout.addLayout(paired_row)
+
+        self.second_link_combo = QtWidgets.QComboBox()
+        self.second_link_combo.currentIndexChanged.connect(self.on_second_link_changed)
+        surface_layout.addWidget(self.second_link_combo)
+
+        self.second_surface_list = QtWidgets.QListWidget()
+        self.second_surface_list.setFixedHeight(110)
+        self.second_surface_list.setStyleSheet(self._surface_list_style())
+        self.second_surface_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.second_surface_list.itemClicked.connect(self.on_second_surface_candidate_clicked)
+        surface_layout.addWidget(self.second_surface_list)
+
+        self.second_surface_combo = QtWidgets.QComboBox()
+        surface_layout.addWidget(self.second_surface_combo)
+
+        layout.addWidget(surface_group)
+
+        control_group = QtWidgets.QGroupBox("3. MANUAL ACTIONS")
         control_group.setStyleSheet(self._group_style())
         ctrl_layout = QtWidgets.QVBoxLayout(control_group)
 
@@ -102,7 +247,7 @@ class GripperPanel(QtWidgets.QWidget):
 
         layout.addWidget(control_group)
 
-        compute_group = QtWidgets.QGroupBox("3. GRIPPER COMPUTE")
+        compute_group = QtWidgets.QGroupBox("4. GRIPPER COMPUTE")
         compute_group.setStyleSheet(self._group_style())
         compute_layout = QtWidgets.QVBoxLayout(compute_group)
 
@@ -1848,6 +1993,11 @@ class GripperPanel(QtWidgets.QWidget):
         if not hasattr(self.mw, 'canvas'):
             return
 
+        if not hasattr(self.mw.canvas, 'highlight_surface_candidate'):
+            if hasattr(self.mw.canvas, 'clear_selected_face_overlays'):
+                self.mw.canvas.clear_selected_face_overlays()
+            return
+
         if not isinstance(candidate, dict):
             self.mw.canvas.clear_highlights()
             return
@@ -1924,42 +2074,38 @@ class GripperPanel(QtWidgets.QWidget):
                 None
             )
 
-        filtered_candidates = [
-            candidate
-            for candidate in candidates
-            if candidate.get('source_joint_name') == selected_joint_name
-        ]
-
         self.second_surface_list.blockSignals(True)
         self.second_surface_list.clear()
 
-        if not filtered_candidates:
-            placeholder = QtWidgets.QListWidgetItem("No faces found for selected second link")
+        selected_candidate = None
+        if selected_joint_name is None:
+            placeholder = QtWidgets.QListWidgetItem("Choose the second link first")
             placeholder.setData(QtCore.Qt.UserRole, None)
             self.second_surface_list.addItem(placeholder)
             self.second_surface_list.blockSignals(False)
             return None
 
-        selected_item = None
-        selected_candidate = None
-        best_item = None
-        best_candidate = None
-        best_distance = float('inf')
-
-        for candidate in filtered_candidates:
-            item = QtWidgets.QListWidgetItem(candidate['display_name'])
-            item.setData(QtCore.Qt.UserRole, candidate)
-            self.second_surface_list.addItem(item)
-
-            if (
+        for candidate in candidates:
+            if candidate.get('source_joint_name') == selected_joint_name and (
                 saved_joint_name == candidate.get('source_joint_name')
                 and saved_name == candidate['surface_name']
                 and saved_link == candidate['link_name']
             ):
-                selected_item = item
                 selected_candidate = candidate
+                break
 
-            if saved_link is not None and saved_center is not None and candidate['link_name'] == saved_link:
+        if selected_candidate is None and preferred_name:
+            for candidate in candidates:
+                if candidate.get('source_joint_name') == selected_joint_name and candidate.get('surface_name') == preferred_name:
+                    selected_candidate = candidate
+                    break
+
+        if selected_candidate is None and saved_link is not None and saved_center is not None:
+            best_candidate = None
+            best_distance = float('inf')
+            for candidate in candidates:
+                if candidate.get('source_joint_name') != selected_joint_name or candidate['link_name'] != saved_link:
+                    continue
                 distance = float(
                     np.linalg.norm(
                         np.array(candidate['local_center'], dtype=float) - saved_center
@@ -1967,29 +2113,18 @@ class GripperPanel(QtWidgets.QWidget):
                 )
                 if distance < best_distance:
                     best_distance = distance
-                    best_item = item
                     best_candidate = candidate
-
-        if selected_item is None and best_item is not None:
-            selected_item = best_item
             selected_candidate = best_candidate
 
-        if selected_item is None and preferred_name:
-            for row in range(self.second_surface_list.count()):
-                item = self.second_surface_list.item(row)
-                candidate = item.data(QtCore.Qt.UserRole)
-                if isinstance(candidate, dict) and candidate.get('surface_name') == preferred_name:
-                    selected_item = item
-                    selected_candidate = candidate
-                    break
-
-        if selected_item is None and self.second_surface_list.count() > 0:
-            selected_item = self.second_surface_list.item(0)
-            row_candidate = selected_item.data(QtCore.Qt.UserRole)
-            selected_candidate = row_candidate if isinstance(row_candidate, dict) else None
-
-        if selected_item is not None:
-            self.second_surface_list.setCurrentItem(selected_item)
+        if selected_candidate is None:
+            placeholder = QtWidgets.QListWidgetItem("No face selected yet")
+            placeholder.setData(QtCore.Qt.UserRole, None)
+            self.second_surface_list.addItem(placeholder)
+        else:
+            item = QtWidgets.QListWidgetItem(selected_candidate['display_name'])
+            item.setData(QtCore.Qt.UserRole, selected_candidate)
+            self.second_surface_list.addItem(item)
+            self.second_surface_list.setCurrentItem(item)
 
         self.second_surface_list.blockSignals(False)
         return selected_candidate
@@ -1998,17 +2133,19 @@ class GripperPanel(QtWidgets.QWidget):
         if not self._has_contact_surface_ui():
             return
         joint = self.mw.robot.joints.get(joint_name) if joint_name else None
+        touch_only = bool(getattr(joint, 'gripping_surface_touch_only', False)) if joint is not None else False
+        mode_suffix = " (touch only)" if touch_only else ""
 
         summary = self._gripping_surface_summary(joint_name) if joint is not None else None
         if summary is None:
-            self.gripping_surface_status_label.setText("Gripping Surface: not set.")
+            self.gripping_surface_status_label.setText(f"Gripping Surface{mode_suffix}: not set.")
             self.gripping_surface_status_label.setStyleSheet(
                 "color: #616161; font-size: 12px;"
             )
         else:
             surface_name, link_name, center_str = summary
             self.gripping_surface_status_label.setText(
-                f"Gripping Surface: {surface_name} on {link_name} @ ({center_str}) cm"
+                f"Gripping Surface{mode_suffix}: {surface_name} on {link_name} @ ({center_str}) cm"
             )
             self.gripping_surface_status_label.setStyleSheet(
                 "color: #2e7d32; font-size: 12px; font-weight: bold;"
@@ -2062,46 +2199,44 @@ class GripperPanel(QtWidgets.QWidget):
 
         self.surface_list.blockSignals(True)
         self.surface_list.clear()
-        selected_item = None
         selected_candidate = None
-        candidate_items = []
 
-        for candidate in candidates:
-            item = QtWidgets.QListWidgetItem(candidate['display_name'])
-            item.setData(QtCore.Qt.UserRole, candidate)
+        if selected_name is not None and selected_link is not None and selected_center is not None:
+            for candidate in candidates:
+                if (
+                    selected_name == candidate['surface_name']
+                    and selected_link == candidate['link_name']
+                ):
+                    selected_candidate = candidate
+                    break
+
+            if selected_candidate is None:
+                best_candidate = None
+                best_distance = float('inf')
+
+                for candidate in candidates:
+                    if candidate['link_name'] != selected_link:
+                        continue
+
+                    candidate_center = np.array(candidate['local_center'], dtype=float)
+                    distance = float(np.linalg.norm(candidate_center - selected_center))
+                    if distance < best_distance:
+                        best_distance = distance
+                        best_candidate = candidate
+
+                if best_candidate is not None:
+                    selected_candidate = best_candidate
+                    self._set_joint_surface_name(joint_name, best_candidate['surface_name'])
+
+        if selected_candidate is not None:
+            item = QtWidgets.QListWidgetItem(selected_candidate['display_name'])
+            item.setData(QtCore.Qt.UserRole, selected_candidate)
             self.surface_list.addItem(item)
-            candidate_items.append((item, candidate))
-
-            if (
-                selected_name == candidate['surface_name']
-                and selected_link == candidate['link_name']
-            ):
-                selected_item = item
-                selected_candidate = candidate
-
-        if selected_item is None and selected_link is not None and selected_center is not None:
-            best_item = None
-            best_candidate = None
-            best_distance = float('inf')
-
-            for item, candidate in candidate_items:
-                if candidate['link_name'] != selected_link:
-                    continue
-
-                candidate_center = np.array(candidate['local_center'], dtype=float)
-                distance = float(np.linalg.norm(candidate_center - selected_center))
-                if distance < best_distance:
-                    best_distance = distance
-                    best_item = item
-                    best_candidate = candidate
-
-            if best_item is not None:
-                selected_item = best_item
-                selected_candidate = best_candidate
-                self._set_joint_surface_name(joint_name, best_candidate['surface_name'])
-
-        if selected_item is not None:
-            self.surface_list.setCurrentItem(selected_item)
+            self.surface_list.setCurrentItem(item)
+        else:
+            placeholder = QtWidgets.QListWidgetItem("No gripping surface selected yet")
+            placeholder.setData(QtCore.Qt.UserRole, None)
+            self.surface_list.addItem(placeholder)
         self.surface_list.blockSignals(False)
         return selected_candidate
 
@@ -2381,9 +2516,14 @@ class GripperPanel(QtWidgets.QWidget):
             self.mw.show_toast("Select a gripper joint first", "warning")
             return
 
+        selected_members = self._selected_group_members()
+        if selected_members:
+            self._set_active_gripper_context(selected_members)
+
         self.mw.joint_tab.on_select_gripper_surface(
             joint_id=joint_name,
-            on_surface_picked=self._on_contact_surface_picked
+            on_surface_picked=self._on_contact_surface_picked,
+            touch_only=True,
         )
 
     def _on_contact_surface_picked(self, selection):

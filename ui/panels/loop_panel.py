@@ -135,32 +135,37 @@ class LoopPanel(QtWidgets.QWidget):
 
     def sync_sliders_to_robot(self):
         """Update or create sliders based on the current robot joints."""
-        if not self.isVisible() and not self.is_recording: return
-        
-        robot = self.mw.robot
-        current_joints = list(robot.joints.keys())
-        
-        # Check if the set of joints has changed (need rebuild)
-        existing_joints = list(self.sliders.keys())
-        if sorted(current_joints) != sorted(existing_joints):
-            self._rebuild_sliders(current_joints)
+        if getattr(self, '_sync_lock', False): return
+        self._sync_lock = True
+        try:
+            if not self.isVisible() and not self.is_recording: return
             
-        # Update values if not interacting
-        for jid in current_joints:
-            if jid in self.sliders:
-                slider = self.sliders[jid]['slider']
-                spin = self.sliders[jid]['spin']
+            robot = self.mw.robot
+            current_joints = list(robot.joints.keys())
+            
+            # Check if the set of joints has changed (need rebuild)
+            existing_joints = list(self.sliders.keys())
+            if sorted(current_joints) != sorted(existing_joints):
+                self._rebuild_sliders(current_joints)
                 
-                # Only update if the user isn't actively dragging it
-                if not slider.isSliderDown():
-                    val = robot.joints[jid].current_deg
-                    slider.blockSignals(True)
-                    slider.setValue(int(val * 10))
-                    slider.blockSignals(False)
+            # Update values if not interacting
+            for jid in current_joints:
+                if jid in self.sliders:
+                    slider = self.sliders[jid]['slider']
+                    spin = self.sliders[jid]['spin']
                     
-                    spin.blockSignals(True)
-                    spin.setValue(val)
-                    spin.blockSignals(False)
+                    # Only update if the user isn't actively dragging it
+                    if not slider.isSliderDown():
+                        val = robot.joints[jid].current_deg
+                        slider.blockSignals(True)
+                        slider.setValue(int(val * 10))
+                        slider.blockSignals(False)
+                        
+                        spin.blockSignals(True)
+                        spin.setValue(val)
+                        spin.blockSignals(False)
+        finally:
+            self._sync_lock = False
 
     def _rebuild_sliders(self, joint_ids):
         # Clear existing

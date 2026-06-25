@@ -303,12 +303,22 @@ class LinksMixin:
                 self.log(f"Original CAD Units: {raw_size[0]:.1f} x {raw_size[1]:.1f} x {raw_size[2]:.1f}")
 
                 # Automatic Unit Detection
+                #
+                # Internal world units are treated as millimeters (default canvas.grid_units_per_cm = 10).
+                # Keep that invariant stable and normalize imported CAD units into millimeters so:
+                # - UI values are always centimeters
+                # - Kinematics/IK/FK and meshes stay in the same unit system
                 if max_dim < 1.0:
-                    self.log(f"Auto-Detected: Unit appears to be METERS ({max_dim:.3f} units). Adjusting graph...")
-                    self.canvas.update_grid_scale(0.01)
+                    # Likely meters (e.g. 0.090). Convert m -> mm.
+                    self.log(f"Auto-Detected: Unit appears to be METERS ({max_dim:.3f} units). Scaling mesh x1000 (m -> mm)...")
+                    mesh.apply_scale(1000.0)
                 elif max_dim > 150:
-                    self.log(f"Auto-Detected: Unit appears to be MILLIMETERS ({max_dim:.1f} units). Adjusting graph...")
-                    self.canvas.update_grid_scale(10.0)
+                    # Likely already millimeters (robot-scale parts are hundreds of mm).
+                    self.log(f"Auto-Detected: Unit appears to be MILLIMETERS ({max_dim:.1f} units). No scaling applied.")
+                else:
+                    # Common case for some CAD exports: centimeters. Convert cm -> mm.
+                    self.log(f"Auto-Detected: Unit appears to be CENTIMETERS ({max_dim:.1f} units). Scaling mesh x10 (cm -> mm)...")
+                    mesh.apply_scale(10.0)
                 
                 # Assign a random distinct color
                 colors = ["#e74c3c", "#3498db", "#2ecc71", "#f1c40f", "#9b59b6", "#1abc9c", "#e67e22", "#95a5a6"]

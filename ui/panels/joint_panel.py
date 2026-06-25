@@ -1199,6 +1199,7 @@ class JointPanel(QtWidgets.QWidget):
             'gripping_surface_link': None,
             'gripping_surface_center_local': None,
             'gripping_surface_normal_local': None,
+            'gripping_surface_touch_only': False,
             'paired_gripping_enabled': False,
             'paired_gripping_surface_joint_name': None,
             'paired_gripping_surface_name': None,
@@ -1313,8 +1314,9 @@ class JointPanel(QtWidgets.QWidget):
             if hasattr(self.mw, 'show_speed_overlay'):
                 self.mw.show_speed_overlay()
                 
-            # 7. Push updated transforms to the 3D viewer
-            self.mw.canvas.update_transforms(self.mw.robot)
+            # 7. Push updated transforms to the 3D viewer, if the canvas is ready
+            if hasattr(self.mw, 'canvas') and self.mw.canvas is not None:
+                self.mw.canvas.update_transforms(self.mw.robot)
             
             # 7b. Update Live Point (LP) coordinates UI
             if hasattr(self.mw, 'update_live_ui'):
@@ -1496,7 +1498,7 @@ class JointPanel(QtWidgets.QWidget):
             'surface_name': None
         }
 
-    def on_select_gripper_surface(self, joint_id=None, on_surface_picked=None):
+    def on_select_gripper_surface(self, joint_id=None, on_surface_picked=None, touch_only=False):
         """Start face picking for a selected gripper joint."""
         joint_id = self._resolve_surface_joint_id(joint_id)
         if not joint_id:
@@ -1546,6 +1548,11 @@ class JointPanel(QtWidgets.QWidget):
             if hasattr(self.mw, 'gripper_tab'):
                 self.mw.gripper_tab.sync_surface_from_pick(saved_surface)
 
+            joint.gripping_surface_touch_only = bool(touch_only)
+            joint_cache = self.joints.get(joint.child_link.name)
+            if joint_cache is not None:
+                joint_cache['gripping_surface_touch_only'] = joint.gripping_surface_touch_only
+
             ratio = getattr(self.mw.canvas, 'grid_units_per_cm', 1.0) or 1.0
             center_cm = saved_surface['world_center'] / ratio
             center_str = ", ".join(f"{coord:.2f}" for coord in center_cm)
@@ -1564,6 +1571,14 @@ class JointPanel(QtWidgets.QWidget):
 
         self.mw.canvas.start_face_picking(handle_surface_pick, color="green")
         return True
+
+    def on_select_gripper_surface_only(self, joint_id=None, on_surface_picked=None):
+        """Pick a gripper face and mark it as the only intended object-contact surface."""
+        return self.on_select_gripper_surface(
+            joint_id=joint_id,
+            on_surface_picked=on_surface_picked,
+            touch_only=True,
+        )
 
     def on_set_live_point(self):
         """Callback for 'Set Live Point' button. Activates point picking."""

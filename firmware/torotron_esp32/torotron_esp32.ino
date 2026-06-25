@@ -11,6 +11,7 @@
 
 #define CONTROL_PERIOD_MS  8
 #define SERIAL_LINE_BUF    96
+bool use_pid = false;
 
 struct ServoJoint {
   Servo  servo;
@@ -23,6 +24,8 @@ struct ServoJoint {
   float  min_limit;
   float  max_limit;
   int    last_write_val;
+  float  integral;
+  float  last_error;
 };
 ServoJoint sJoints[6];
 
@@ -152,6 +155,13 @@ void parseCommand(String cmd) {
     Serial.println("PONG");
     return;
   }
+  if (cmd.startsWith("PID:")) {
+    use_pid = (cmd.substring(4).toInt() == 1);
+    for (int i=0; i<6; i++) { sJoints[i].integral = 0; sJoints[i].last_error = 0; }
+    Serial.print("💡 [HW] PID Control set to: ");
+    Serial.println(use_pid ? "ON" : "OFF");
+    return;
+  }
   int f = cmd.indexOf(':');
   int l = cmd.lastIndexOf(':');
   if (f < 1 || l <= f) return;
@@ -183,15 +193,32 @@ void updateServos() {
       // Map software degrees directly where 0 is stop, -90 is full reverse, 90 is full forward
       sVal = (int)constrain(sJoints[i].target_deg + 90, 0, 180);
     } else {
-      // Standard: interpolate then move
+      // Standard: interpolate or PID then move
       float err = sJoints[i].target_deg - sJoints[i].current_deg;
-      if (fabs(err) < 0.1f) sJoints[i].current_deg = sJoints[i].target_deg;
-      else {
-        float step = (sJoints[i].speed_pct / 100.0f) * 4.0f;
-        sJoints[i].current_deg += (err > 0 ? 1 : -1) * max(0.1f, step);
-        if ((err > 0 && sJoints[i].current_deg > sJoints[i].target_deg) ||
-            (err < 0 && sJoints[i].current_deg < sJoints[i].target_deg))
+      if (use_pid) {
+        float dt = CONTROL_PERIOD_MS / 1000.0f;
+        sJoints[i].integral += err * dt;
+        float deriv = (err - sJoints[i].last_error) / dt;
+        sJoints[i].last_error = err;
+        // Smooth generic PID parameters for hobby servos
+        float P = 1.8f; float I = 0.2f; float D = 0.05f;
+        float output = (P * err) + (I * sJoints[i].integral) + (D * deriv);
+        float max_step = (sJoints[i].speed_pct / 100.0f) * 10.0f;
+        output = constrain(output, -max_step, max_step);
+        sJoints[i].current_deg += output;
+        if (fabs(err) < 0.1f) {
           sJoints[i].current_deg = sJoints[i].target_deg;
+          sJoints[i].integral = 0.0f;
+        }
+      } else {
+        if (fabs(err) < 0.1f) sJoints[i].current_deg = sJoints[i].target_deg;
+        else {
+          float step = (sJoints[i].speed_pct / 100.0f) * 4.0f;
+          sJoints[i].current_deg += (err > 0 ? 1 : -1) * max(0.1f, step);
+          if ((err > 0 && sJoints[i].current_deg > sJoints[i].target_deg) ||
+              (err < 0 && sJoints[i].current_deg < sJoints[i].target_deg))
+            sJoints[i].current_deg = sJoints[i].target_deg;
+        }
       }
       sVal = (int)constrain(sJoints[i].current_deg + 90, 0, 180);
     }
